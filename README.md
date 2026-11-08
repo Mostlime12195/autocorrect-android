@@ -4,9 +4,12 @@ A QWERTY keyboard (Android `InputMethodService`) whose autocorrect is the tiny o
 `autocorrect` project. It is a Kotlin port of the browser demo's pipeline (candidate generation → LM re-ranking →
 re-check of the previous word) on onnxruntime-android, fed with **real touch coordinates** instead of key centres.
 
-- Keyboard: shift / caps lock (double-tap shift), backspace with repeat, numbers + two symbol layers, space, comma,
-  period, enter that follows the field's action (Go / Search / Send / Next / Done / newline). Long-press ?123 opens the
-  keyboard switcher.
+- Keyboard: shift / caps lock (double-tap shift; lock icon + accent key), accelerating backspace repeat, numbers + two
+  symbol layers, space, comma, period, enter whose icon follows the field's action (send / search / go / next / done /
+  newline). Long-press: digits on the top row, accents (é, ñ, ü, ...), ? ! … on the period. Long-press ?123 opens the
+  keyboard switcher; the gear in an empty strip opens settings.
+- Look and feel: Material Symbols icons (Apache 2.0), Material You dynamic colors (light / dark), key preview bubbles,
+  press animation, strip fade-in, a flash when a correction lands and an undo chip with the word as typed.
 - Autocorrect on space / punctuation / enter, with the text before the cursor as the LM's left context (up to 400
   characters, clipped to the last 64 tokens like the eval). Backspace right after a correction restores what you typed
   (and keeps it).
@@ -44,14 +47,14 @@ In the Autocorrect app:
 
 ## Models and download
 
-Models are not in the APK or in git. On first run the app fetches
-`https://smitten.mostlime.hackclub.app/autocorrect-android/manifest.json`, which lists each model's files with size and
-SHA-256, and downloads the active model's files into app-private storage with WorkManager (progress in settings). A file
-is used only after its SHA-256 matches. A copy of the manifest is bundled (`app/src/main/assets/manifest.json`) as the
-fallback when the host is unreachable.
-
-Why the demo host and not GitHub release assets: the repo is private, so release assets need a GitHub token to download,
-which the app shouldn't carry; and a new model only needs a new manifest + file on the host, no new APK.
+Models are not in the APK or in this repo. They are release assets of the public repo
+[Mostlime12195/autocorrect-models](https://github.com/Mostlime12195/autocorrect-models) (tag `models-v1`; this repo is
+private, so its own release assets would need a token). On first run the app fetches that release's `manifest.json`
+(fallback: `https://smitten.mostlime.hackclub.app/autocorrect-android/manifest.json`), which lists each model's files
+with size and SHA-256 and the mirrors to download from, and downloads the active model's files into app-private storage
+with WorkManager (progress in settings). A file is used only after its SHA-256 matches. A copy of the manifest is
+bundled (`app/src/main/assets/manifest.json`) as the fallback. A new model only needs new assets + manifest, no new APK:
+`gh release upload models-v1 --clobber -R Mostlime12195/autocorrect-models <files> manifest.json`.
 
 Model files are **pre-optimized ORT format** (`.ort`), made on an arm64 host by `android_export/to_ort.py` in the
 autocorrect repo (all graph optimizations applied at conversion, int4 `DequantizeLinear+MatMul` fused to `MatMulNBits`
@@ -61,7 +64,7 @@ int8 embedding head into a `MatMulNBits` (bits=8) node shared with the embedding
 dequantises the whole 32k×640 table on every call (~40% of the step time on ARM).
 
 Publishing a model: in the autocorrect repo, `to_ort.py` → `make_manifest.py --app <this repo>/app/src/main/assets/manifest.json`
-→ `android_export/publish.sh`. For a style-token model, list it in `make_manifest.py --style_models <id>` (sets
+→ upload to the models release (`android_export/publish.sh` also mirrors to smitten when Nest SSH works). For a style-token model, list it in `make_manifest.py --style_models <id>` (sets
 `supports_style`) and add per-style params under `style_params` when the style evals land.
 
 ### Session policy, latency, battery
@@ -71,7 +74,9 @@ Publishing a model: in the autocorrect repo, `to_ort.py` → `make_manifest.py -
   `onLowMemory`). Until it's ready, word-end correction uses the cheap spatial + unigram path.
 - The LM runs only at word end (space / punctuation / enter / strip pick). While typing, the strip uses the cheap path
   (debounced).
-- The LM is skipped when the typed word is an exact lexicon hit, its spatial fit is within `SKIP_FIT_PER_LETTER` (0.6
+- Early exit: with a clear cheap leader (4 nats) only the top 2 + typed are LM-scored; the re-check is skipped after a
+  clear first-pass win (6 nats) unless it's a confusion-set word. Up to 4 ORT threads.
+- The LM is skipped when the typed word is one of the 20k most frequent words, an exact lexicon hit, its spatial fit is within `SKIP_FIT_PER_LETTER` (0.6
   nats/letter) of a perfect hit, it beats every other candidate by `SKIP_MARGIN` (3 nats) on spatial + prior, and it
   has no confusion-set / contraction / split alternatives (`engine/Corrector.kt`). The skip rate is in the debug overlay
   and the Stats row.
