@@ -44,6 +44,14 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
   punctuation / apostrophes). Undoing anything else (confusable swaps like their/there, capitals, punctuation,
   rewinds, multi-word edits) only adds a suppression: the same edit needs 3 more nats for 7 days (`files/dict/learn.tsv`).
   "Delete my uploaded data" wipes both files.
+- No word window for grammar: after a typing pause (400 ms) suggest-only re-checks every sentence of the field it can
+  read (2000 chars before and after the cursor, all words, the rest of the sentence as right context, cached per
+  sentence) and adds / removes underlines; auto mode rewinds confusables across the whole sentence (up to 20 words,
+  +0.5 nats of margin per word beyond 3) and, in the formal style, adds commas and full stops scored on everything
+  typed after them (a full stop needs at least 3 words of right context; per word only commas). The next key cancels it.
+- In-app updates: `latest.json` on the Nest mirror (`scripts/publish_apk.sh <tag>` after every release) is checked when
+  settings open and every 6 h; a notification and a settings banner offer the update, the APK is downloaded (auto on
+  Wi-Fi unless turned off), SHA-256-checked and installed with a PackageInstaller session.
 - Suggestion strip: top 3. While typing it shows cheap suggestions (spatial + word frequency); after a correction it
   shows the alternatives, and tapping one replaces the corrected word.
 - Models (downloaded on first run, see below): m2 style 106M int4 (default), m2 style int8, m2 106M int4 / int8, Block
