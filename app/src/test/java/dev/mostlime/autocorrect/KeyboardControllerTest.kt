@@ -245,6 +245,19 @@ class KeyboardControllerTest {
         assertTrue(ed2.visible.toString(), ed2.visible.contains("the "))
     }
 
+    @Test fun standaloneIIsCapitalised() {
+        type("this is a test i want ")
+        engine.deliver(engine.queue.size)
+        assertTrue(ed.text.toString(), ed.text.endsWith("test I want "))
+    }
+
+    @Test fun casualKeepsLowercaseI() {
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "casual", { "test" }, "t"))
+        type("so i want ")
+        engine.deliver(engine.queue.size)
+        assertEquals("so i want ", ed.text.toString())
+    }
+
     @Test fun passwordFieldsNeverCorrectOrLog() {
         ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD, 0), true, "standard", { "test" }, "t"))
         ed.text.setLength(0)

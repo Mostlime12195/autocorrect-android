@@ -358,8 +358,8 @@ class KeyboardController(
         val mg = r.merge?.takeIf { pd.prevOut != null }
         val rc = r.recheck?.takeIf { mg == null && pd.prevOut != null }
         // new text for the previous word: re-check flip and/or formal punctuation
-        val prevNew = r.prevText?.takeIf { mg == null && pd.prevOut != null && it != pd.prevOut }
-        val out = mg?.to ?: r.out
+        val prevNew = r.prevText?.let(::capI)?.takeIf { mg == null && pd.prevOut != null && it != pd.prevOut }
+        val out = capI(mg?.to ?: r.out)
         val cur = composing.toString()
         val changed = out != pd.typed || prevNew != null
         val ev = if (!config.policy.sensitive) buildEvent(pd, r) else null
@@ -450,6 +450,12 @@ class KeyboardController(
             }
             StripMode.NONE -> {}
         }
+    }
+
+    /** Standalone i / i'm / i'll / i'd / i've -> I, I'm, ... (every style except casual, which keeps text as typed). */
+    private fun capI(text: String): String {
+        if (config.style == "casual") return text
+        return text.split(' ').joinToString(" ") { w -> if (w in I_WORDS) "I" + w.substring(1) else w }
     }
 
     /** Long-press alternate: replaces the character the press already typed (é for e, 1 for q, ? for .). */
@@ -556,6 +562,7 @@ class KeyboardController(
         const val DOUBLE_TAP_MS = 350L
         val WORD_RE = Regex("[A-Za-z]+(?:'[A-Za-z]+)*'?")
         const val WORD_END_PUNCT = ".,!?;:)\""
+        val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")
 
         fun r3(x: Double) = Math.round(x * 1000.0) / 1000.0
 
