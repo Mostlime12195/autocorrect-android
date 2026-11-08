@@ -23,6 +23,9 @@ data class CorrectorConfig(
     val adaptiveMargin: Double = ADAPTIVE_MARGIN,
     /** Early exit: skip the re-check when the previous word won its first pass by this much (and isn't a confusion word). */
     val recheckSkipMargin: Double = RECHECK_SKIP_MARGIN,
+    /** Re-check only candidates within this many nats of the previous word's first-pass best (at most recheckMax). */
+    val recheckWindow: Double = RECHECK_WINDOW,
+    val recheckMax: Int = RECHECK_MAX,
 ) {
     companion object {
         const val SKIP_MARGIN = 3.0
@@ -31,6 +34,8 @@ data class CorrectorConfig(
         const val ADAPTIVE_MARGIN = 4.0
         const val MISSPELLING_PENALTY = 0.0
         const val RECHECK_SKIP_MARGIN = 6.0
+        const val RECHECK_WINDOW = 8.0
+        const val RECHECK_MAX = 4
     }
 }
 
@@ -49,7 +54,9 @@ class WordInput(
 /** The previous word, for the re-check pass. */
 class PrevWord(val slot: Slot, val idx: Int, val left: String, val sep: String, val lmScored: Boolean,
                /** first-pass score margin of the previous word's choice over its runner-up (0 = unknown) */
-               val margin: Double = 0.0)
+               val margin: Double = 0.0,
+               /** first-pass scores per slot candidate: lets the re-check skip candidates that were far behind (null = all) */
+               val scores: DoubleArray? = null)
 
 class Recheck(val from: String, val to: String, val idx: Int)
 
@@ -229,9 +236,17 @@ class Corrector(
             !CONFUSIONS.containsKey(prev.slot.cands[prev.idx].lowercase()) && !CONFUSIONS.containsKey(prev.slot.typed.lowercase())
         if (prev != null && p.margin != null && !prevConfident && (prev.lmScored || !config.recheckOnlyIfScored || mergePossible || formal)) {
             val nxt = sep + s.cands[k]
-            val lp2 = scorer.score(prev.slot.cands.map { LmReq(prev.left, prev.sep + it + nxt) })
-            val (k2, sc2) = choose(prev.slot, lp2, p.lamRe, p.bias, p.pen)
-            if (k2 != prev.idx && sc2[k2] - sc2[prev.idx] > p.margin) recheck = Recheck(prev.slot.cands[prev.idx], prev.slot.cands[k2], k2)
+            // the re-check rows are the longest of the word (candidate + next word): only the plausible ones
+            val keep = recheckSubset(prev)
+            val ps = prev.slot.subset(keep)
+            val cur0 = keep.indexOf(prev.idx)
+            val lp2s = scorer.score(ps.cands.map { LmReq(prev.left, prev.sep + it + nxt) })
+            val (k2s, sc2s) = choose(ps, lp2s, p.lamRe, p.bias, p.pen)
+            // back to full-slot indices (unscored candidates can't win)
+            val sc2 = DoubleArray(prev.slot.cands.size) { Double.NEGATIVE_INFINITY }
+            keep.forEachIndexed { j, i -> sc2[i] = sc2s[j] }
+            val k2 = keep[k2s]
+            if (cur0 >= 0 && k2 != prev.idx && sc2[k2] - sc2[prev.idx] > p.margin) recheck = Recheck(prev.slot.cands[prev.idx], prev.slot.cands[k2], k2)
             // C. merge of the previous token and this one (only across a single space)
             val g2 = gen2
             if (merge != null && g2 != null && sep == " " && g2.mergeOk(merge.input.prevTyped, merge.typed)) {
@@ -287,6 +302,14 @@ class Corrector(
         stats.lmMsTotal += dt
         return WordResult(s, sc, lp, k, out, skipped = false, cheap = false, nScored = s.cands.size, nCands = full.cands.size,
             lmMs = dt, recheck = recheck, merge = mergeOut, prevText = prevText)
+    }
+
+    /** previous-word candidates worth re-checking: the current choice + those close to the first-pass best */
+    private fun recheckSubset(prev: PrevWord): IntArray {
+        val sc = prev.scores ?: return prev.slot.cands.indices.toList().toIntArray()
+        val best = sc.maxOrNull() ?: return intArrayOf(prev.idx)
+        val near = sc.indices.filter { sc[it] >= best - config.recheckWindow }.sortedByDescending { sc[it] }.take(config.recheckMax)
+        return (near + prev.idx).distinct().sorted().toIntArray()
     }
 
     private fun keep(full: Slot, t0: Long): WordResult {

@@ -41,6 +41,10 @@ class StepModel(
     @Volatile var closed = false
         private set
 
+    /** timing counters (benchmarks / debugging): runs, wall ns in run(), ns inside session.run, rows x padded length */
+    class Counters { var runs = 0L; var totalNs = 0L; var ortNs = 0L; var cells = 0L; var usedTokens = 0L }
+    val counters = Counters()
+
     fun fresh(): LmState {
         val d = HashMap<String, FloatArray>()
         val s = HashMap<String, LongArray>()
@@ -60,6 +64,7 @@ class StepModel(
      */
     fun run(rows: List<IntArray>, pos0: Int, state: LmState, keepState: Boolean): StepOutput {
         check(!closed) { "session closed" }
+        val tStart = System.nanoTime()
         val b = rows.size
         val n = rows.maxOf { it.size }
         val ids = LongArray(b * n)
@@ -84,7 +89,11 @@ class StepModel(
                 add("tok_lp"); add("bnd")
                 if (keepState) { add("last_lp"); meta.stateNames.forEach { add("present_$it") } }
             }
-            session.run(feeds, want).use { res ->
+            val tOrt = System.nanoTime()
+            val result = session.run(feeds, want)
+            counters.ortNs += System.nanoTime() - tOrt
+            counters.runs++; counters.cells += (b * n).toLong(); counters.usedTokens += rows.sumOf { it.size }.toLong()
+            result.use { res ->
                 fun floats(name: String): FloatArray {
                     val t = res.get(name).get() as OnnxTensor
                     val fb = t.floatBuffer
@@ -110,6 +119,7 @@ class StepModel(
             }
         } finally {
             tensors.forEach { it.close() }
+            counters.totalNs += System.nanoTime() - tStart
         }
     }
 
