@@ -82,7 +82,10 @@ object EngineHolder {
             val t0 = App.now()
             val lex = Lexicon(app.assets.open("lexicon.tsv").bufferedReader().use { it.readText() })
             val gen = CandidateGenerator(lex, SpatialModel(sigma = 0.3))
-            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = SPACE_BAR_X))
+            val miss = runCatching {
+                app.assets.open("misspellings.tsv").bufferedReader().readLines().mapNotNull { l -> l.split('\t').takeIf { it.size >= 2 }?.let { it[0] to it[1] } }.toMap()
+            }.getOrDefault(emptyMap())
+            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = SPACE_BAR_X), misspellings = miss)
             lexiconMs = App.now() - t0
             Log.i(TAG, "lexicon ${lex.size} words in $lexiconMs ms")
         }

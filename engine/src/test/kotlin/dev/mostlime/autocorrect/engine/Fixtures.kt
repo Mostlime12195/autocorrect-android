@@ -2,7 +2,6 @@ package dev.mostlime.autocorrect.engine
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import java.io.File
 import java.util.zip.GZIPInputStream
 
 object Fixtures {
@@ -13,10 +12,8 @@ object Fixtures {
 
     fun json(name: String): JsonElement = Json.parseToJsonElement(text(name))
 
-    val lexicon: Lexicon by lazy {
-        val f = listOf("../app/src/main/assets/lexicon.tsv", "app/src/main/assets/lexicon.tsv").map(::File).first { it.exists() }
-        Lexicon(f.readText())
-    }
+    /** the lexicon the Python reference fixtures were made with (the app ships the cleaned one) */
+    val lexicon: Lexicon by lazy { Lexicon(text("lexicon_ref.tsv")) }
     val gen: CandidateGenerator by lazy { CandidateGenerator(lexicon, SpatialModel(sigma = 0.3)) }
     val gen2: CandidateGeneratorV2 by lazy { CandidateGeneratorV2(gen) }
     val tokM1: SPTokenizer by lazy { SPTokenizer.fromJson(text("vocab.json")) }

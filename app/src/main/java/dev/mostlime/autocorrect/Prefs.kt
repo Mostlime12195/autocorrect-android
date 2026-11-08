@@ -30,7 +30,8 @@ class Prefs(private val ctx: Context) {
     val share get() = sp.getBoolean(SHARE, false)
     val wifiOnly get() = sp.getBoolean(WIFI_ONLY, true)
     val uploadUrl get() = (sp.getString(UPLOAD_URL, null) ?: "").ifBlank { DEFAULT_UPLOAD_URL }
-    val manifestUrl get() = (sp.getString(MANIFEST_URL, null) ?: "").ifBlank { DEFAULT_MANIFEST_URL }
+    /** manifest mirrors, tried in order (a custom URL in settings replaces them) */
+    val manifestUrls: List<String> get() = (sp.getString(MANIFEST_URL, null) ?: "").ifBlank { null }?.let { listOf(it) } ?: DEFAULT_MANIFEST_URLS
 
     var uploadOffset: Long
         get() = sp.getLong(UPLOAD_OFFSET, 0)
@@ -55,7 +56,7 @@ class Prefs(private val ctx: Context) {
 
         /** Placeholder: the collection endpoint doesn't exist yet (docs/upload-schema.md). Uploads to it are skipped. */
         const val DEFAULT_UPLOAD_URL = "https://example.invalid/autocorrect/v1/events"
-        const val DEFAULT_MANIFEST_URL = "https://smitten.mostlime.hackclub.app/autocorrect-android/manifest.json"
+        val DEFAULT_MANIFEST_URLS = listOf("https://smitten.mostlime.hackclub.app/autocorrect-android/manifest.json")
         val STYLES = listOf("casual", "standard", "formal")
     }
 }

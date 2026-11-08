@@ -92,7 +92,7 @@ class SettingsActivity : AppCompatActivity() {
             }
             // first run: fetch the manifest and start the default model download
             lifecycleScope.launch {
-                withContext(Dispatchers.IO) { app.store.refreshManifest(app.prefs.manifestUrl) }
+                withContext(Dispatchers.IO) { app.store.refreshManifest(app.prefs.manifestUrls) }
                 val spec = app.store.activeSpec()
                 if (!app.store.isInstalled(spec)) DownloadWorker.start(requireContext(), spec.id)
                 refresh()

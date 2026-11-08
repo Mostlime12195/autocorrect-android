@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val app = App.instance
-        app.store.refreshManifest(app.prefs.manifestUrl)
+        app.store.refreshManifest(app.prefs.manifestUrls)
         val id = inputData.getString(KEY_MODEL)
         val spec = id?.let { app.store.manifest().model(it) } ?: app.store.activeSpec()
         try {

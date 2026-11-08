@@ -53,7 +53,7 @@ class ModelSpec(
     val downloadBytes get() = files.sumOf { it.size }
 }
 
-class Manifest(val schema: Int, val updated: String, val baseUrl: String, val default: String, val batterySaver: String, val models: List<ModelSpec>) {
+class Manifest(val schema: Int, val updated: String, val baseUrls: List<String>, val default: String, val batterySaver: String, val models: List<ModelSpec>) {
     fun model(id: String) = models.firstOrNull { it.id == id }
 
     companion object {
@@ -94,7 +94,8 @@ class Manifest(val schema: Int, val updated: String, val baseUrl: String, val de
             return Manifest(
                 schema = o["schema"]!!.jsonPrimitive.int,
                 updated = o["updated"]?.jsonPrimitive?.content ?: "",
-                baseUrl = o["base_url"]!!.jsonPrimitive.content,
+                // mirrors, tried in order (e.g. GitHub release assets, then the demo host)
+                baseUrls = o["base_urls"]?.jsonArray?.map { it.jsonPrimitive.content } ?: listOf(o["base_url"]!!.jsonPrimitive.content),
                 default = o["default"]!!.jsonPrimitive.content,
                 batterySaver = o["battery_saver"]?.jsonPrimitive?.content ?: o["default"]!!.jsonPrimitive.content,
                 models = models,
@@ -127,7 +128,12 @@ class ModelStore(private val ctx: Context) {
         return m
     }
 
-    /** Fetch the remote manifest (blocking). Keeps the current one on any error. */
+    /** Fetch the remote manifest from the first mirror that answers (blocking). Keeps the current one on any error. */
+    fun refreshManifest(urls: List<String>): Boolean {
+        for (u in urls) if (refreshManifest(u)) return true
+        return false
+    }
+
     fun refreshManifest(url: String): Boolean = try {
         val text = httpGet(url)
         val m = Manifest.parse(text)
@@ -156,12 +162,24 @@ class ModelStore(private val ctx: Context) {
 
     /** Download + verify every missing file of the model. progress(doneBytes, totalBytes). Throws on failure. */
     fun download(spec: ModelSpec, progress: (Long, Long) -> Unit) {
-        val base = manifest().baseUrl
+        val bases = manifest().baseUrls
         val total = spec.downloadBytes
         var done = installedBytes(spec)
         progress(done, total)
         for (f in spec.files) {
             if (isInstalled(f)) continue
+            var err: Exception? = null
+            for (base in bases) {
+                try { fetch(base, f, done, total, progress); err = null; break } catch (e: IOException) { err = e; Log.w(TAG, "$base${f.name}: $e") }
+            }
+            err?.let { throw it }
+            done += f.size
+            progress(done, total)
+        }
+    }
+
+    private fun fetch(base: String, f: RemoteFile, done: Long, total: Long, progress: (Long, Long) -> Unit) {
+        run {
             val tmp = File(dir, f.name + ".part")
             val md = MessageDigest.getInstance("SHA-256")
             val conn = (URL(base + f.name).openConnection() as HttpURLConnection).apply {
@@ -192,8 +210,6 @@ class ModelStore(private val ctx: Context) {
                 marker(f).delete()
                 if (!tmp.renameTo(file(f))) throw IOException("rename failed for ${f.name}")
                 marker(f).writeText(f.sha256)
-                done += f.size
-                progress(done, total)
             } finally {
                 conn.disconnect()
             }

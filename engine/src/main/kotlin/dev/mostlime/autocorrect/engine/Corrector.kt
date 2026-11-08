@@ -17,6 +17,8 @@ data class CorrectorConfig(
     val skipMaxRank: Int = SKIP_MAX_RANK,
     /** Re-check the previous word only when its own decision went through the LM. */
     val recheckOnlyIfScored: Boolean = true,
+    /** Extra cost on the typed string when it's a known misspelling (lexicon_clean_removed: thier, alot, ...). 0 = off. */
+    val misspellingPenalty: Double = MISSPELLING_PENALTY,
     /** Early exit: when the cheap ranking's leader beats the runner-up by this much, LM-score only the top 2 (+ typed). */
     val adaptiveMargin: Double = ADAPTIVE_MARGIN,
     /** Early exit: skip the re-check when the previous word won its first pass by this much (and isn't a confusion word). */
@@ -27,6 +29,7 @@ data class CorrectorConfig(
         const val SKIP_FIT_PER_LETTER = 0.6
         const val SKIP_MAX_RANK = 20000
         const val ADAPTIVE_MARGIN = 4.0
+        const val MISSPELLING_PENALTY = 0.0
         const val RECHECK_SKIP_MARGIN = 6.0
     }
 }
@@ -113,7 +116,12 @@ class Corrector(
     val gen: CandidateGenerator,
     var gen2: CandidateGeneratorV2? = null,
     var config: CorrectorConfig = CorrectorConfig(),
+    /** known misspellings (lowercase) -> their correction */
+    var misspellings: Map<String, String> = emptyMap(),
 ) {
+    private fun typedBias(s: Slot, bias: Double) =
+        if (config.misspellingPenalty != 0.0 && s.typed.lowercase() in misspellings) bias - config.misspellingPenalty else bias
+
     val lex get() = gen.lex
     val stats = Stats()
 
@@ -198,7 +206,7 @@ class Corrector(
         }
         if (scorer == null) {
             stats.cheapOnly++
-            val sc = DoubleArray(full.cands.size) { cheapScore(full, it) + if (it == full.typedIdx) config.cheapKeepBias else 0.0 }
+            val sc = DoubleArray(full.cands.size) { cheapScore(full, it) + if (it == full.typedIdx) typedBias(full, config.cheapKeepBias) else 0.0 }
             var k = 0
             for (i in 1 until sc.size) if (sc[i] > sc[k]) k = i
             return WordResult(full, sc, null, k, full.cands[k], skipped = false, cheap = true, nScored = 0, nCands = full.cands.size,
@@ -214,7 +222,7 @@ class Corrector(
         }
         val s = full.subset(lmSubset(full))
         val lp = scorer.score(s.cands.map { LmReq(left, sep + it) })
-        val (k, sc) = choose(s, lp, p.lam, p.bias, p.pen)
+        val (k, sc) = choose(s, lp, p.lam, typedBias(s, p.bias), p.pen)
         var recheck: Recheck? = null
         var mergeOut: Merge? = null
         val prevConfident = prev != null && prev.margin >= config.recheckSkipMargin &&
