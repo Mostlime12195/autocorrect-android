@@ -28,6 +28,12 @@ set -- $B
 adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 sleep 4
 adb exec-out screencap -p > smoke/keyboard.png
+# wait (up to 4 min) for the model download + session load, so the typing below runs the LM
+for i in $(seq 1 48); do
+  adb logcat -d 2>/dev/null | grep -q "AcEngine: session .* ready" && break
+  sleep 5
+done
+adb logcat -d | grep "AcEngine: session" | tail -2
 # IME window frame -> key geometry (KeyboardView: strip 44dp, rows clamp(keyW*1.25, 46dp, 58dp))
 TOP=$(adb shell dumpsys window windows | grep -A40 'InputMethod' | grep -o 'frame=\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]' | head -1 | sed 's/frame=\[[0-9]*,\([0-9]*\)\].*/\1/')
 [ -z "$TOP" ] && TOP=$(adb shell dumpsys input_method | grep -o 'mInputShown=[a-z]*')
@@ -58,5 +64,6 @@ TEXT=$(grep -o 'text="[^"]*" resource-id="dev.mostlime.autocorrect:id/try_it"' s
 echo "typed text: '$TEXT'"
 adb logcat -d > smoke/logcat.txt
 grep -E "AcEngine|AcIME|AcLog|ModelStore" smoke/logcat.txt | tail -30
+echo "per-word timings:"; grep "AcIME: word" smoke/logcat.txt | sed 's/.*AcIME: //'
 if grep -q "FATAL EXCEPTION" smoke/logcat.txt; then grep -A30 "FATAL EXCEPTION" smoke/logcat.txt | head -60; echo "CRASH"; exit 1; fi
 case "$TEXT" in *ello*) echo "OK: keyboard typed into the field";; *) echo "no typed text found"; exit 1;; esac

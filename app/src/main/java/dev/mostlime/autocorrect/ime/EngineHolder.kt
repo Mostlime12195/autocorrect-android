@@ -40,6 +40,9 @@ object EngineHolder {
     /** Space bar extent of the Android layout in key units (KeyboardLayout: x 2.5 .. 7.5). */
     val SPACE_BAR_X = doubleArrayOf(2.5, 7.5)
 
+    /** ORT intra-op threads: short bursts at word end, so use up to 4 cores */
+    val THREADS = minOf(4, Runtime.getRuntime().availableProcessors()).coerceAtLeast(1)
+
     @Volatile var corrector: Corrector? = null
         private set
     @Volatile var scorer: NeuralScorer? = null
@@ -101,7 +104,7 @@ object EngineHolder {
             val f = app.store.file(want.graph)
             val buf = RandomAccessFile(f, "r").use { it.channel.map(FileChannel.MapMode.READ_ONLY, 0, it.length()) }
             val env = OrtEnvironment.getEnvironment()
-            val step = StepModel.open(env, buf, want.meta, threads = 2,
+            val step = StepModel.open(env, buf, want.meta, threads = THREADS,
                 ortFormat = want.format == "ort", extraConfig = want.sessionConfig)
             withContext(dispatcher) {
                 release()

@@ -1,8 +1,8 @@
 {
  "schema": 1,
- "updated": "2026-11-08T18:43:23Z",
+ "updated": "2026-11-08T19:11:42Z",
  "base_url": "https://smitten.mostlime.hackclub.app/autocorrect/",
- "default": "m2_int4",
+ "default": "m2_int8",
  "battery_saver": "block4",
  "models": [
   {

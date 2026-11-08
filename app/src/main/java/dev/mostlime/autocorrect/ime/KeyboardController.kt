@@ -95,7 +95,8 @@ class KeyboardController(
     )
     private var last: Last? = null
 
-    private class Prev(val slot: Slot, var idx: Int, var out: String, val lmScored: Boolean, val typed: String, val touches: List<Touch>)
+    private class Prev(val slot: Slot, var idx: Int, var out: String, val lmScored: Boolean, val typed: String, val touches: List<Touch>,
+                       val margin: Double = 0.0)
     private var prev: Prev? = null
 
     /** A correction in flight. anchor = our cursor position counter right after the word + separator were committed. */
@@ -290,7 +291,7 @@ class KeyboardController(
         val prevWord = if (p != null && SEG.findAll(left).lastOrNull()?.let { it.value == p.out && it.range.last == left.length - 1 } == true) {
             val (leftp, sepp) = splitLeft(left.dropLast(p.out.length))
             prevOut = p.out; prevSep = sep
-            PrevWord(p.slot, p.idx, leftp, sepp, p.lmScored)
+            PrevWord(p.slot, p.idx, leftp, sepp, p.lmScored, p.margin)
         } else null
         val id = nextId++
         val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, pos)
@@ -332,7 +333,7 @@ class KeyboardController(
             stats.unchanged++
             if (ev != null) writePerf(r)
             // the word stands as typed: it becomes the previous word for the next re-check
-            if (pendings.none { it.anchor > pd.anchor }) prev = Prev(r.slot, r.chosen, pd.typed, r.lmScored, pd.typed, pd.touches)
+            if (pendings.none { it.anchor > pd.anchor }) prev = Prev(r.slot, r.chosen, pd.typed, r.lmScored, pd.typed, pd.touches, if (r.lmScored) r.margin else 0.0)
             return
         }
         val prefixOld = if (mg != null || prevNew != null) pd.prevOut + pd.prevSep else ""
@@ -368,7 +369,7 @@ class KeyboardController(
         val undoPrefix = if (mg != null) pd.prevOut + pd.prevSep else ""
         val newest = pendings.none { it.anchor > pd.anchor }
         if (xi == 0) last = Last(pd.typed, pd.touches, out, pd.sepText, r, ev, undoPrefix) else ev?.let { write(it) }
-        prev = if (mg != null || !newest || xi != cur.length) null else Prev(r.slot, r.chosen, out, r.lmScored, pd.typed, pd.touches)
+        prev = if (mg != null || !newest || xi != cur.length) null else Prev(r.slot, r.chosen, out, r.lmScored, pd.typed, pd.touches, if (r.lmScored) r.margin else 0.0)
         if (xi == 0 && out != pd.typed) {
             val ranked = r.ranked(3).toMutableList()
             if (pd.typed !in ranked) { if (ranked.size >= 3) ranked[2] = pd.typed else ranked.add(pd.typed) }

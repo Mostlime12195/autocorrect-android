@@ -96,6 +96,10 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         override fun showStrip(words: List<String>, bold: Int) { kv?.setSuggestions(words, bold) }
         override fun setShift(shift: Shift) { kv?.shift = shift }
         override fun onResult(r: WordResult?) {
+            // timing only, never the text
+            if (r != null) Log.i(TAG, "word -> " +
+                (if (r.cheap) "cheap" else if (r.skipped) "skip" else "LM") + " ${"%.0f".format(r.lmMs)}ms scored ${r.nScored}/${r.nCands} " +
+                "ctx ${r.ctxTokens}t recheck=${r.recheck != null} model=${EngineHolder.spec?.id} threads=${EngineHolder.THREADS}")
             if (r != null && r.lmScored) {
                 if (EngineHolder.firstInferenceMs < 0) { EngineHolder.firstInferenceMs = r.lmMs; logSession() }
                 EngineHolder.lastInferenceMs = r.lmMs; EngineHolder.lastScored = r.nScored

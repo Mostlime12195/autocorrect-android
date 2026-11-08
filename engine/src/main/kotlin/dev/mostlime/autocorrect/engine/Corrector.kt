@@ -17,11 +17,17 @@ data class CorrectorConfig(
     val skipMaxRank: Int = SKIP_MAX_RANK,
     /** Re-check the previous word only when its own decision went through the LM. */
     val recheckOnlyIfScored: Boolean = true,
+    /** Early exit: when the cheap ranking's leader beats the runner-up by this much, LM-score only the top 2 (+ typed). */
+    val adaptiveMargin: Double = ADAPTIVE_MARGIN,
+    /** Early exit: skip the re-check when the previous word won its first pass by this much (and isn't a confusion word). */
+    val recheckSkipMargin: Double = RECHECK_SKIP_MARGIN,
 ) {
     companion object {
         const val SKIP_MARGIN = 3.0
         const val SKIP_FIT_PER_LETTER = 0.6
         const val SKIP_MAX_RANK = 20000
+        const val ADAPTIVE_MARGIN = 4.0
+        const val RECHECK_SKIP_MARGIN = 6.0
     }
 }
 
@@ -38,7 +44,9 @@ class WordInput(
 )
 
 /** The previous word, for the re-check pass. */
-class PrevWord(val slot: Slot, val idx: Int, val left: String, val sep: String, val lmScored: Boolean)
+class PrevWord(val slot: Slot, val idx: Int, val left: String, val sep: String, val lmScored: Boolean,
+               /** first-pass score margin of the previous word's choice over its runner-up (0 = unknown) */
+               val margin: Double = 0.0)
 
 class Recheck(val from: String, val to: String, val idx: Int)
 
@@ -69,6 +77,12 @@ class WordResult(
     /** new text for the previous word (re-check flip and/or formal punctuation), null = unchanged */
     val prevText: String? = null,
 ) {
+    /** chosen score minus the best other score (first pass) */
+    val margin: Double get() {
+        var best = Double.NEGATIVE_INFINITY
+        for (i in scores.indices) if (i != chosen && scores[i] > best) best = scores[i]
+        return if (best == Double.NEGATIVE_INFINITY) 0.0 else scores[chosen] - best
+    }
     /** left-context tokens the LM saw (set by the caller from NeuralScorer.lastCtxTokens; -1 = no LM) */
     var ctxTokens: Int = -1
     val changed get() = out != slot.typed
@@ -125,10 +139,13 @@ class Corrector(
 
     /** Indices to LM-score: top-K cheap-ranked lexicon words + typed + every non-word kind / confusion extra. */
     fun lmSubset(s: Slot): IntArray {
-        val k = config.lmTopK
+        var k = config.lmTopK
         if (k <= 0 || k >= s.cands.size) return s.cands.indices.toList().toIntArray()
-        val words = s.cands.indices.filter { s.kind(it) == Kind.WORD && !(s.logp?.get(it)?.isNaN() ?: true) && it != s.typedIdx }
-            .sortedByDescending { cheapScore(s, it) }.take(k)
+        val ranked = s.cands.indices.filter { s.kind(it) == Kind.WORD && !(s.logp?.get(it)?.isNaN() ?: true) && it != s.typedIdx }
+            .sortedByDescending { cheapScore(s, it) }
+        // early exit: a clear cheap leader only needs a runner-up for comparison
+        if (ranked.size >= 2 && cheapScore(s, ranked[0]) - cheapScore(s, ranked[1]) >= config.adaptiveMargin) k = minOf(k, 2)
+        val words = ranked.take(k)
         val keep = HashSet(words)
         if (s.typedIdx >= 0) keep.add(s.typedIdx)
         val tl = s.typed.lowercase()
@@ -200,7 +217,9 @@ class Corrector(
         val (k, sc) = choose(s, lp, p.lam, p.bias, p.pen)
         var recheck: Recheck? = null
         var mergeOut: Merge? = null
-        if (prev != null && p.margin != null && (prev.lmScored || !config.recheckOnlyIfScored || mergePossible || formal)) {
+        val prevConfident = prev != null && prev.margin >= config.recheckSkipMargin &&
+            !CONFUSIONS.containsKey(prev.slot.cands[prev.idx].lowercase()) && !CONFUSIONS.containsKey(prev.slot.typed.lowercase())
+        if (prev != null && p.margin != null && !prevConfident && (prev.lmScored || !config.recheckOnlyIfScored || mergePossible || formal)) {
             val nxt = sep + s.cands[k]
             val lp2 = scorer.score(prev.slot.cands.map { LmReq(prev.left, prev.sep + it + nxt) })
             val (k2, sc2) = choose(prev.slot, lp2, p.lamRe, p.bias, p.pen)
