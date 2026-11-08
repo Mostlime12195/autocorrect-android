@@ -49,9 +49,15 @@ def key(c):
         if c in row: return ((off[r] + row.index(c) + 0.5) * kw, top + strip + (r + 0.5) * rh)
 for c in "hello wrold thsi is a tesy ":
     x, y = key(c); print(int(x), int(y))
+print('WAIT')
+for c in "i wnat to go hoem now and hvae some fod ":
+    x, y = key(c); print(int(x), int(y))
 PY
-while read X Y; do adb shell input tap $X $Y < /dev/null; sleep 0.4; done < smoke/taps.txt
-sleep 3
+while read X Y; do
+  if [ "$X" = WAIT ]; then sleep 20; continue; fi
+  adb shell input tap $X $Y < /dev/null; sleep 0.4
+done < smoke/taps.txt
+sleep 20
 adb exec-out screencap -p > smoke/typed.png
 # same keyboard with gesture navigation (3-button is the emulator default)
 adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural || true

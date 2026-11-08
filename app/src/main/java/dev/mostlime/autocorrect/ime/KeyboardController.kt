@@ -17,6 +17,8 @@ interface Editor {
     fun finishComposing()
     fun commit(text: String)
     fun deleteBefore(n: Int)
+    /** replace the n chars before the cursor with text, as one edit where the editor allows it */
+    fun replaceBefore(n: Int, text: String) { deleteBefore(n); commit(text) }
     fun beginBatch()
     fun endBatch()
     /** backspace with no composing word: -> chars removed before the cursor, or -1 if unknown (selection, key event) */
@@ -126,6 +128,7 @@ class KeyboardController(
         override fun finishComposing() { e.finishComposing(); compLen = 0 }
         override fun commit(text: String) { e.commit(text); pos += text.length - compLen; compLen = 0 }
         override fun deleteBefore(n: Int) { e.deleteBefore(n); pos -= n }
+        override fun replaceBefore(n: Int, text: String) { e.replaceBefore(n, text); pos += text.length - n; compLen = 0 }
         override fun beginBatch() = e.beginBatch()
         override fun endBatch() = e.endBatch()
         override fun deleteKey(): Int { val n = e.deleteKey(); if (n < 0) invalidatePendings() else pos -= n; return n }
@@ -386,8 +389,7 @@ class KeyboardController(
         val before = pos
         ed.beginBatch()
         if (cur.isNotEmpty()) ed.finishComposing()
-        ed.deleteBefore(oldCore.length + xi)
-        ed.commit(newCore + after.dropLast(cur.length))
+        ed.replaceBefore(oldCore.length + xi, newCore + after.dropLast(cur.length))
         if (cur.isNotEmpty()) ed.setComposing(cur)
         ed.endBatch()
         // later words moved by the length change
@@ -548,7 +550,7 @@ class KeyboardController(
         const val LOG_CANDS = 8
         const val ENTER_HOLD_MS = 400L
         const val FAST_HOLD_MS = 60L
-        const val MAX_PENDING = 3
+        const val MAX_PENDING = 6
         const val MAX_AFTER = 120L
         const val SUGGEST_DEBOUNCE_MS = 60L
         const val DOUBLE_TAP_MS = 350L

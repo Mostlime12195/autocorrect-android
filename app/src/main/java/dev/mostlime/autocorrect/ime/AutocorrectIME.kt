@@ -43,6 +43,16 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         override fun finishComposing() { ic?.finishComposingText() }
         override fun commit(text: String) { ic?.commitText(text, 1) }
         override fun deleteBefore(n: Int) { ic?.deleteSurroundingText(n, 0) }
+        /** one replace (composing region over the span + commit) instead of a visible delete then insert */
+        override fun replaceBefore(n: Int, text: String) {
+            val c = ic ?: return
+            val et = c.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)
+            if (et != null && et.selectionStart == et.selectionEnd && et.selectionStart >= 0) {
+                val end = et.startOffset + et.selectionStart
+                if (end - n >= 0 && c.setComposingRegion(end - n, end)) { c.commitText(text, 1); return }
+            }
+            c.deleteSurroundingText(n, 0); c.commitText(text, 1)
+        }
         override fun beginBatch() { ic?.beginBatchEdit() }
         override fun endBatch() { ic?.endBatchEdit() }
         override fun deleteKey(): Int {
