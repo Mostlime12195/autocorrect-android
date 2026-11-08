@@ -67,8 +67,8 @@ class KeyboardControllerTest {
             Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = doubleArrayOf(2.5, 7.5)))
         }
         val GOOD = setOf("the", "quick", "brown", "fox", "one", "more", "question", "that", "be", "only", "i", "have", "is", "it")
-        /** LM that likes common words in GOOD and dislikes everything else */
-        val lm = LmScorer { reqs -> DoubleArray(reqs.size) { i -> val w = reqs[i].cont.trim().split(" ").last().lowercase(); if (w in GOOD) -2.0 else -14.0 } }
+        /** LM that likes common words in GOOD and dislikes everything else (summed over the continuation's words) */
+        val lm = LmScorer { reqs -> DoubleArray(reqs.size) { i -> reqs[i].cont.trim().split(Regex("\\s+")).sumOf { w -> if (w.lowercase() in GOOD) -2.0 else -14.0 } } }
         val P = DecodeParams(lam = 1.25, bias = 0.0, margin = 0.0, lamR = 1.25)
     }
 
