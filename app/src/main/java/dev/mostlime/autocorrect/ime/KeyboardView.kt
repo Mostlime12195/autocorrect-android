@@ -77,7 +77,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             repeatHandler.postDelayed(this, REPEAT_MS)
         }
     }
-    private var spaceDownAt = 0L
+    private var symDownAt = 0L
 
     init {
         setBackgroundColor(bg)
@@ -152,7 +152,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val k = layer.keyAt(ux, min(uy, 3.99f)) ?: return true
                 pressed[e.getPointerId(i)] = k
                 if (haptics) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                if (k.type == KeyType.SPACE) spaceDownAt = e.eventTime
+                // text keys fire on press (keeps order when presses overlap); ?123 fires on release so a long press
+                // can open the keyboard switcher instead
+                if (k.type == KeyType.TO_SYMBOLS) symDownAt = e.eventTime
                 else listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k))
                 if (k.type == KeyType.BACKSPACE) { repeatKey = k; repeatHandler.postDelayed(repeater, REPEAT_START_MS) }
                 invalidate()
@@ -161,9 +163,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val i = e.actionIndex
                 val k = pressed.remove(e.getPointerId(i))
                 if (k?.type == KeyType.BACKSPACE) { repeatKey = null; repeatHandler.removeCallbacks(repeater) }
-                if (k?.type == KeyType.SPACE && e.actionMasked != MotionEvent.ACTION_CANCEL) {
-                    // space fires on release so a long press can open the keyboard switcher
-                    if (e.eventTime - spaceDownAt > LONG_PRESS_MS) listener.onSwitchIme() else listener.onKey(k, Touch.APOS)
+                if (k?.type == KeyType.TO_SYMBOLS && e.actionMasked != MotionEvent.ACTION_CANCEL) {
+                    if (e.eventTime - symDownAt > LONG_PRESS_MS) listener.onSwitchIme() else listener.onKey(k, Touch.APOS)
                 }
                 if (k == null && e.actionMasked == MotionEvent.ACTION_UP && e.getY(i) < stripH && stripDown >= 0) {
                     val cell = (e.getX(i) / (width / 3f)).toInt().coerceIn(0, 2)

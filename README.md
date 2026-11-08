@@ -5,7 +5,7 @@ A QWERTY keyboard (Android `InputMethodService`) whose autocorrect is the tiny o
 re-check of the previous word) on onnxruntime-android, fed with **real touch coordinates** instead of key centres.
 
 - Keyboard: shift / caps lock (double-tap shift), backspace with repeat, numbers + two symbol layers, space, comma,
-  period, enter that follows the field's action (Go / Search / Send / Next / Done / newline). Long-press space opens the
+  period, enter that follows the field's action (Go / Search / Send / Next / Done / newline). Long-press ?123 opens the
   keyboard switcher.
 - Autocorrect on space / punctuation / enter, with the text before the cursor as the LM's left context. Backspace right
   after a correction restores what you typed (and keeps it).
@@ -29,7 +29,7 @@ In the Autocorrect app:
 
 1. **Enable the keyboard** → turn on "Autocorrect keyboard" (Android warns that keyboards can see what you type; this
    one keeps its log on the phone unless you turn on sharing).
-2. **Switch to it** → pick "Autocorrect keyboard". You can also long-press the space bar (or use the keyboard icon in
+2. **Switch to it** → pick "Autocorrect keyboard". You can also long-press ?123 (or use the keyboard icon in
    the navigation bar) to switch.
 3. Type in the "Try the keyboard here" box at the top.
 

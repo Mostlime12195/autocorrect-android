@@ -12,6 +12,7 @@ import android.view.inputmethod.InputMethodManager
 import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.BuildConfig
 import dev.mostlime.autocorrect.engine.DecodeParams
+import dev.mostlime.autocorrect.engine.MergeInput
 import dev.mostlime.autocorrect.engine.PrevWord
 import dev.mostlime.autocorrect.engine.SEG
 import dev.mostlime.autocorrect.engine.Slot
@@ -52,11 +53,13 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     private class Last(
         val typed: String, val touches: List<Touch>, var out: String, val sepText: String,
         val result: WordResult?, var event: MutableMap<String, Any?>?, val autocorrected: Boolean,
+        /** text to put back before the restored word on undo (a merge also swallowed the previous word) */
+        val undoPrefix: String = "",
     )
     private var last: Last? = null
 
     /** The previous word as the corrector saw it, for the re-check pass. */
-    private class Prev(val slot: Slot, var idx: Int, var out: String, val lmScored: Boolean)
+    private class Prev(val slot: Slot, var idx: Int, var out: String, val lmScored: Boolean, val typed: String, val touches: List<Touch>)
     private var prev: Prev? = null
 
     private enum class StripMode { NONE, TYPING, LAST_WORD }
@@ -212,6 +215,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                 // undo: back to exactly what was typed, kept as typed at the next word end
                 ic.beginBatchEdit()
                 ic.deleteSurroundingText(tail.length, 0)
+                if (l.undoPrefix.isNotEmpty()) ic.commitText(l.undoPrefix, 1)
                 composing.append(l.typed); touches.addAll(l.touches)
                 ic.setComposingText(composing, 1)
                 ic.endBatchEdit()
@@ -269,14 +273,23 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                 withContext(EngineHolder.dispatcher) {
                     val corr = EngineHolder.ensureLexicon(app)
                     val sc = scorer?.takeIf { !it.step.closed }
-                    corr.correctWord(WordInput(typed, tch, left, sep), sc, params, prevWord)
+                    corr.correctWord(WordInput(typed, tch, left, sep), sc, params, prevWord,
+                        merge = if (prevWord != null && p != null) MergeInput(p.typed, p.touches) else null)
                 }
             }
         }
-        val out = result?.out ?: typed
-        val rc = result?.recheck
+        val mg = result?.merge?.takeIf { prevOut != null }
+        val out = mg?.to ?: result?.out ?: typed
+        val rc = result?.recheck.takeIf { mg == null }
+        var undoPrefix = ""
         ic.beginBatchEdit()
-        if (rc != null && prevOut != null) {
+        if (mg != null) {
+            // "some thing" -> "something": replace the previous word, the space and this word
+            ic.commitText(typed, 1)
+            ic.deleteSurroundingText(prevOut!!.length + sep.length + typed.length, 0)
+            ic.commitText(mg.to + sepText, 1)
+            undoPrefix = prevOut + sep
+        } else if (rc != null && prevOut != null) {
             ic.commitText(out, 1)
             ic.deleteSurroundingText(prevOut.length + sep.length + out.length, 0)
             ic.commitText(rc.to + sep + out + sepText, 1)
@@ -293,10 +306,11 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         }
         if (result != null) { EngineHolder.lastInferenceMs = result.lmMs; EngineHolder.lastScored = result.nScored }
         val ev = if (result != null && !policy.sensitive) buildEvent(typed, tch, before, sep, result, if (recheckApplied) rc!!.from to rc.to else null) else null
+        if (mg != null) ev?.let { it["merge"] = mapOf("from" to prevOut + sep + typed, "to" to mg.to); it["final"] = mg.to }
         val corrected = out != typed
-        last = Last(typed, tch, out, sepText, result, if (corrected || recheckApplied) ev else null, corrected)
+        last = Last(typed, tch, out, sepText, result, if (corrected || recheckApplied) ev else null, corrected, undoPrefix)
         if (ev != null && !corrected && !recheckApplied) writePerf(result!!)
-        prev = result?.let { r -> Prev(r.slot, r.chosen, out, r.lmScored) }
+        prev = if (mg != null) null else result?.let { r -> Prev(r.slot, r.chosen, out, r.lmScored, typed, tch) }
         if (result != null && corrected) {
             val ranked = result.ranked(3).toMutableList()
             if (typed !in ranked) { if (ranked.size >= 3) ranked[2] = typed else ranked.add(typed) }
