@@ -74,7 +74,9 @@ class KeyboardControllerTest {
         override fun endBatch() { depth--; shown() }
         override fun deleteKey(): Int { if (text.isEmpty()) return 0; text.setLength(text.length - 1); if (cs > text.length) cs = -1; return 1 }
         override fun enter() { cs = -1; text.append('\n') }
-        override fun capsMode() = false
+        /** what getCursorCapsMode would say at the cursor */
+        var caps = false
+        override fun capsMode() = caps
     }
 
     companion object {

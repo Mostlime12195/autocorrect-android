@@ -65,14 +65,18 @@ object KeyboardLayout {
             bottom(KeyDef("ABC", "", KeyType.TO_LETTERS, 0f, 1.5f, 3))
     )
 
+    /**
+     * Long-press popups (Gboard-like): the key's hint symbol first (drawn in the key's top-right corner and chosen when
+     * the press is released without sliding), then accented / alternate forms.
+     */
     private val ALTS = mapOf(
-        "q" to listOf("1"), "w" to listOf("2"), "e" to listOf("3", "é", "è", "ê", "ë"), "r" to listOf("4"), "t" to listOf("5"),
-        "y" to listOf("6", "ý"), "u" to listOf("7", "ü", "ú", "ù", "û"), "i" to listOf("8", "í", "ì", "î", "ï"),
-        "o" to listOf("9", "ö", "ó", "ò", "ô", "õ", "ø"), "p" to listOf("0"),
-        "a" to listOf("à", "á", "â", "ä", "ã", "å", "æ"), "s" to listOf("ß", "ś", "š"), "c" to listOf("ç", "ć", "č"),
-        "n" to listOf("ñ", "ń"), "l" to listOf("ł"), "z" to listOf("ž", "ź", "ż"),
-        "." to listOf("?", "!", "…", "-", "@", "#"),
-    )
+        "q" to "1", "w" to "2 ŵ", "e" to "3 è é ê ë ē ė ę", "r" to "4 ř", "t" to "5 ţ ť þ", "y" to "6 ý ÿ",
+        "u" to "7 ù ú û ü ū", "i" to "8 ì í î ï ī į", "o" to "9 ò ó ô ö õ ø ō œ", "p" to "0",
+        "a" to "@ à á â ä æ ã å ā", "s" to "# ß ś š ş", "d" to "$ ď ð", "f" to "_", "g" to "& ğ", "h" to "-", "j" to "+",
+        "k" to "(", "l" to ") ł ľ",
+        "z" to "* ž ź ż", "x" to "\"", "c" to "' ç ć č", "v" to ":", "b" to ";", "n" to "! ñ ń ň", "m" to "?",
+        "." to "? ! … - @ #",
+    ).mapValues { it.value.split(' ') }
 
     /** Long-press alternates for a key (letters layer and the period). */
     fun alternates(k: KeyDef): List<String> = if (k.type == KeyType.CHAR) ALTS[k.text].orEmpty() else emptyList()

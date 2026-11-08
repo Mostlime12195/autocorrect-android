@@ -20,6 +20,14 @@ class LayoutTest {
         assertTrue("unreachable: $missing", missing.isEmpty())
     }
 
+    @Test fun longPressPopupsStartWithTheHint() {
+        val k = { c: String -> KeyboardLayout.LETTERS.keys.first { it.text == c } }
+        assertTrue(KeyboardLayout.alternates(k("e")) == listOf("3", "è", "é", "ê", "ë", "ē", "ė", "ę"))
+        assertTrue(KeyboardLayout.alternates(k("a")) == listOf("@", "à", "á", "â", "ä", "æ", "ã", "å", "ā"))
+        // every letter has a one-character hint (the default when released without sliding)
+        for (c in 'a'..'z') assertTrue("$c", KeyboardLayout.alternates(k(c.toString())).firstOrNull()?.length == 1)
+    }
+
     @Test fun numberRowKeepsLetterTouchesInModelUnits() {
         val l = KeyboardLayout.LETTERS_NUM
         val q = l.keys.first { it.text == "q" }

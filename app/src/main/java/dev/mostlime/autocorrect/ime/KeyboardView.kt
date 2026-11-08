@@ -230,7 +230,20 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         } else @Suppress("DEPRECATION") ins.systemWindowInsetBottom
     }
 
+    /** bottom band where the system's own gestures start (gesture navigation's swipe up): touches starting there are ignored */
+    private var gestureBottom = 0
+
+    private fun gestureBottomOf(ins: WindowInsets?): Int {
+        if (ins == null) return 0
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> ins.getInsets(WindowInsets.Type.mandatorySystemGestures()).bottom
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> @Suppress("DEPRECATION") ins.mandatorySystemGestureInsets.bottom
+            else -> 0
+        }
+    }
+
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        gestureBottom = gestureBottomOf(insets)
         val b = bottomOf(insets)
         if (b != bottomInset) { bottomInset = b; requestLayout() }
         return insets
@@ -244,6 +257,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         // edge-to-edge IME windows (Android 15+) can hand the insets to a parent: read the window's own insets too
         bottomInset = maxOf(bottomInset, bottomOf(rootWindowInsets))
+        gestureBottom = maxOf(gestureBottom, gestureBottomOf(rootWindowInsets))
         val w = View.MeasureSpec.getSize(widthMeasureSpec)
         keyW = w / 10f
         rowH = (keyW * 1.25f).coerceIn(46 * dp, 58 * dp)
@@ -252,8 +266,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     }
 
     private fun keyRect(k: KeyDef, out: RectF) {
-        val padX = 3 * dp
-        val padY = 4 * dp
+        val padX = 4 * dp
+        val padY = 5 * dp
         out.set(k.x * keyW + padX, stripH + k.row * rh + padY, (k.x + k.w) * keyW - padX, stripH + (k.row + 1) * rh - padY)
     }
 
@@ -307,13 +321,14 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             }
             val label = if (k.type == KeyType.CHAR && shift != Shift.OFF) k.label.uppercase() else k.label
             textPaint.color = pal.fg
-            textPaint.textSize = if (label.length > 1) 14 * dp else 22 * dp
+            // smaller labels on short keys (height setting 80%) so the corner hint keeps its room
+            textPaint.textSize = if (label.length > 1) 14 * dp else minOf(22 * dp, rect.height() * 0.56f)
             canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3, textPaint)
-            // hint for the long-press alternate on the top row (digits)
-            if (layer.isLetters && k.row == layer.letterRowOffset) {
+            // hint: the long-press default (digit / symbol), inset from the top-right corner
+            if (layer.isLetters && k.text != ".") {
                 KeyboardLayout.alternates(k).firstOrNull()?.let { alt ->
-                    textPaint.color = pal.dim; textPaint.textSize = 9 * dp
-                    canvas.drawText(alt, rect.right - 7 * dp, rect.top + 11 * dp, textPaint)
+                    textPaint.color = pal.dim; textPaint.textSize = 8.5f * dp
+                    canvas.drawText(alt, rect.right - 7.5f * dp, rect.top + 11 * dp, textPaint)
                 }
             }
         }
@@ -480,6 +495,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val x = e.getX(i)
                 val y = e.getY(i)
                 if (alts != null) return true   // one alternates popup at a time
+                // the system's swipe-up (gesture navigation) starts here: never a key press
+                if (gestureBottom > 0 && y >= height - gestureBottom) return true
                 if (y < stripH) {
                     if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                         stripDown = x; stripLongDone = false
@@ -495,8 +512,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 buzz()
                 // text keys fire on press (keeps order when presses overlap); ?123 fires on release so a long press
                 // can open the keyboard switcher instead
+                // space fires on release inside the key, so a touch that turns into a system swipe never types
                 if (k.type == KeyType.TO_SYMBOLS) symDownAt = e.eventTime
-                else listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
+                else if (k.type != KeyType.SPACE) listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
                 if (k.type == KeyType.BACKSPACE) { repeatKey = k; repeats = 0; ui.postDelayed(repeater, REPEAT_START_MS) }
                 if (k.type == KeyType.CHAR && k.text == "," && layer.isLetters) {
                     commaDone = false; ui.removeCallbacks(commaLongPress); ui.postDelayed(commaLongPress, LONG_PRESS_ALT_MS)
@@ -507,6 +525,11 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
+                // a press that slides up off the keyboard (a navigation swipe) is cancelled
+                for (pi in 0 until e.pointerCount) {
+                    val pid = e.getPointerId(pi)
+                    if (e.getY(pi) < 0 && pressed[pid]?.type == KeyType.SPACE) { pressed.remove(pid); invalidate() }
+                }
                 val a = alts ?: return true
                 val pi = e.findPointerIndex(a.pointer)
                 if (pi < 0) return true
@@ -529,6 +552,12 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                     alts = null
                 }
                 if (k?.type == KeyType.BACKSPACE) { repeatKey = null; ui.removeCallbacks(repeater) }
+                if (k?.type == KeyType.SPACE && e.actionMasked != MotionEvent.ACTION_CANCEL) {
+                    keyRect(k, rect)
+                    val ux = e.getX(i); val uy = e.getY(i)
+                    if (ux >= rect.left - 4 * dp && ux <= rect.right + 4 * dp && uy >= rect.top - 8 * dp && uy <= height - gestureBottom.toFloat())
+                        listener.onKey(k, Touch.APOS)
+                }
                 if (k?.type == KeyType.TO_SYMBOLS && e.actionMasked != MotionEvent.ACTION_CANCEL) {
                     if (e.eventTime - symDownAt > LONG_PRESS_MS) listener.onSwitchIme() else listener.onKey(k, Touch.APOS)
                 }

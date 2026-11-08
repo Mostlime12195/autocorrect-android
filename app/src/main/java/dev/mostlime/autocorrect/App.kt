@@ -26,6 +26,8 @@ class App : Application() {
         prefs = Prefs(this)
         store = ModelStore(this)
         events = EventLog(this)
+        // the re-check / rewind setting is gone (always on): an old "off" must not linger
+        if (prefs.sp.contains(Prefs.REWIND)) prefs.sp.edit().remove(Prefs.REWIND).apply()
         // the keyboard runs in ":ime"; background work is scheduled from the app process only
         val imeProcess = Build.VERSION.SDK_INT >= 28 && getProcessName().endsWith(":ime")
         if (!imeProcess) UploadWorker.schedule(this, prefs)

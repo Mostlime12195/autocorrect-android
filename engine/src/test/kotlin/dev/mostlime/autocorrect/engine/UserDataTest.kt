@@ -40,6 +40,16 @@ class UserDataTest {
         assertEquals(0.0, u.penalty("their", "there"))
     }
 
+    @Test fun autoCapOffNeverAddsSentenceCapitals() {
+        val c = Corrector(Fixtures.gen, Fixtures.gen2)
+        val lm = LmScorer { reqs -> DoubleArray(reqs.size) { i -> if (reqs[i].cont.any { it.isUpperCase() }) -1.0 else -6.0 } }
+        val p = DecodeParams(1.25, 0.0, 0.0, 1.25)
+        assertEquals("Hello", c.correctWord(WordInput("hello", null, "", ""), lm, p, null, formal = true, autoCap = true).out)
+        assertEquals("hello", c.correctWord(WordInput("hello", null, "", ""), lm, p, null, formal = true, autoCap = false).out)
+        // i -> I is not a sentence capital: it stays with the style
+        assertEquals("I", c.correctWord(WordInput("i", null, "so", " "), lm, p, null, formal = true, autoCap = false).out)
+    }
+
     @Test fun dictionaryWordsAreKeptByTheCorrector() {
         val u = UserData(null, null)
         val c = Corrector(Fixtures.gen, Fixtures.gen2, user = u)

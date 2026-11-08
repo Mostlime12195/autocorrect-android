@@ -19,7 +19,13 @@ data class FieldPolicy(
     val numeric: Boolean,
     val multiLine: Boolean,
     val capSentences: Boolean,
+    /** TYPE_TEXT_FLAG_CAP_WORDS / CAP_CHARACTERS */
+    val capWords: Boolean = false,
+    val capChars: Boolean = false,
 ) {
+    /** the field asks for some automatic capitals */
+    val anyCaps get() = capSentences || capWords || capChars
+
     companion object {
         val NONE = FieldPolicy(sensitive = true, autocorrect = false, suggestions = false, password = false, numeric = false, multiLine = false, capSentences = false)
 
@@ -49,6 +55,8 @@ data class FieldPolicy(
                 numeric = numeric,
                 multiLine = (flags and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0,
                 capSentences = text && !password && !emailUri && (flags and InputType.TYPE_TEXT_FLAG_CAP_SENTENCES) != 0,
+                capWords = text && !password && !emailUri && (flags and InputType.TYPE_TEXT_FLAG_CAP_WORDS) != 0,
+                capChars = text && !password && !emailUri && (flags and InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS) != 0,
             )
         }
     }

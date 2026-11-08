@@ -13,8 +13,8 @@
             app:summary="Unsure corrections are underlined and suggested instead of applied" app:iconSpaceReserved="false" />
         <Preference app:key="dictionary" app:title="Personal dictionary"
             app:summary="Words that are never corrected or flagged" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="rewind" app:title="Fix to/too, their/there… from later words" app:defaultValue="true"
-            app:summary="When the model is very sure, re-check confusable words up to 3 words back" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="auto_cap" app:title="Auto-capitalize" app:defaultValue="true"
+            app:summary="Capital letter at the start of a sentence (shift and corrections), when the text field allows it" app:iconSpaceReserved="false" />
  <SwitchPreferenceCompat app:key="clipboard" app:title="Clipboard suggestions and history" app:defaultValue="true"
             app:summary="Offer recently copied text and keep the last 10 copies on this phone. Never from password or sensitive clips." app:iconSpaceReserved="false" />
         <ListPreference app:key="style" app:title="Style" app:defaultValue="standard"

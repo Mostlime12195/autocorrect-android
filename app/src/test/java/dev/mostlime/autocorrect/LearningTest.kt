@@ -250,6 +250,26 @@ class LearningTest {
         assertTrue(ed.text.toString(), ed.text.endsWith("I want "))
     }
 
+    @Test fun autoCapitalizeFollowsTheSettingAndFieldFlags() {
+        ed.caps = true
+        val sentences = FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, 0)
+        ctl.startInput(ControllerConfig(sentences, true, "standard", { "t" }, "t", autoCap = true))
+        assertEquals(Shift.ON, ctl.shift)
+        ctl.startInput(ControllerConfig(sentences, true, "standard", { "t" }, "t", autoCap = false))
+        assertEquals(Shift.OFF, ctl.shift)
+        // no CAP flag in the field: no auto-shift even with the setting on
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "t" }, "t", autoCap = true))
+        assertEquals(Shift.OFF, ctl.shift)
+        // ALL CAPS field keeps the shift after a letter
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 0), true, "standard", { "t" }, "t"))
+        type("ab")
+        assertEquals("AB", ed.composingText)
+        // requests carry the setting to the corrector
+        ctl.startInput(ControllerConfig(sentences, true, "formal", { "t" }, "t", autoCap = false))
+        type("hello ")
+        assertFalse(engine.queue.last().first.autoCap)
+    }
+
     @Test fun spellingClassification() {
         start()
         assertTrue(ctl.isSpellingEdit("fized", "fixed"))

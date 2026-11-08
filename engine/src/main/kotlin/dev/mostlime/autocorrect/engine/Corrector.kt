@@ -204,10 +204,10 @@ class Corrector(
      * Decide one finished word. scorer == null -> cheap path. prev -> re-check pass for the previous word.
      */
     fun correctWord(w: WordInput, scorer: LmScorer?, p: DecodeParams, prev: PrevWord?, allowChange: Boolean = true,
-                    merge: MergeInput? = null, formal: Boolean = false): WordResult {
+                    merge: MergeInput? = null, formal: Boolean = false, autoCap: Boolean = true): WordResult {
         val t0 = System.nanoTime()
         val mi = if (merge != null) MergeCtx(merge, w.typed, w.touches) else null
-        return decideSlot(candidates(w.typed, w.touches), w.left, w.sep, scorer, p, prev, allowChange, t0, mi, formal)
+        return decideSlot(candidates(w.typed, w.touches), w.left, w.sep, scorer, p, prev, allowChange, t0, mi, formal, autoCap)
     }
 
     class MergeCtx(val input: MergeInput, val typed: String, val touches: List<Touch>?)
@@ -216,7 +216,9 @@ class Corrector(
 
     fun decideSlot(full: Slot, left: String, sep: String, scorer: LmScorer?, p: DecodeParams, prev: PrevWord?,
                    allowChange: Boolean = true, t0: Long = System.nanoTime(), merge: MergeCtx? = null,
-                   formal: Boolean = false): WordResult {
+                   formal: Boolean = false,
+                   /** false: never add sentence-start capitals (i -> I stays with the style) */
+                   autoCap: Boolean = true): WordResult {
         stats.words++
         if (!allowChange || full.typedIdx < 0 && full.cands.isEmpty()) {
             return keep(full, t0)
@@ -292,7 +294,7 @@ class Corrector(
         var prevText: String? = recheck?.to
         if (formal) {
             // A2. capitals: sentence start, i -> I (pipeline.js decodeV2 with style)
-            if (isLower(out.take(1)) && (sentStart(left + sep) || out.split(' ')[0] in I_WORDS)) {
+            if (isLower(out.take(1)) && ((autoCap && sentStart(left + sep)) || out.split(' ')[0] in I_WORDS)) {
                 val lc = scorer.score(listOf(LmReq(left, sep + cap1(out))))[0]
                 val kd = s.kind(k)
                 val v = s.sp[k] + p.lam * lc + (if (k == s.typedIdx) p.bias else 0.0) - (if (kd != Kind.WORD) p.pen[kd] ?: 0.0 else 0.0) - (p.pen["caps"] ?: 0.0) -
@@ -305,7 +307,7 @@ class Corrector(
                 if (po.isNotEmpty() && po.last().let { it in 'a'..'z' || it in 'A'..'Z' }) {
                     val pre = prev.sep + po
                     val reqs = listOf(LmReq(prev.left, pre + sep + out)) +
-                        PUNCT.map { (pc, _) -> LmReq(prev.left, pre + pc + sep + (if (pc in SENT_END) cap1(out) else out)) }
+                        PUNCT.map { (pc, _) -> LmReq(prev.left, pre + pc + sep + (if (pc in SENT_END && autoCap) cap1(out) else out)) }
                     val lpp = scorer.score(reqs)
                     var best = p.lamRe * lpp[0]
                     var bj = -1
@@ -316,7 +318,7 @@ class Corrector(
                     if (bj >= 0) {
                         val pc = PUNCT[bj].first
                         prevText = po + pc
-                        if (pc in SENT_END && isLower(out.take(1))) out = cap1(out)
+                        if (autoCap && pc in SENT_END && isLower(out.take(1))) out = cap1(out)
                     }
                 }
             }

@@ -25,7 +25,8 @@ class Prefs(private val ctx: Context) {
     val batterySaver get() = sp.getBoolean(BATTERY_SAVER, false)
     val style get() = sp.getString(STYLE, "standard") ?: "standard"
     val autocorrect get() = sp.getBoolean(AUTOCORRECT, true)
-    val rewind get() = sp.getBoolean(REWIND, true)
+    /** sentence-start capitals (auto-shift + the corrector's sentence capitals) */
+    val autoCap get() = sp.getBoolean(AUTO_CAP, true)
     /** "suggest" = never edit the text, only underline likely typos and suggest fixes */
     val suggestOnly get() = sp.getString(CORRECTION_MODE, "auto") == "suggest"
     val confidentOnly get() = sp.getBoolean(CONFIDENT_ONLY, false)
@@ -65,7 +66,9 @@ class Prefs(private val ctx: Context) {
         const val BATTERY_SAVER = "battery_saver"
         const val STYLE = "style"
         const val AUTOCORRECT = "autocorrect"
+        /** removed setting (rewind is always on now): dropped from old installs at start */
         const val REWIND = "rewind"
+        const val AUTO_CAP = "auto_cap"
         const val CORRECTION_MODE = "correction_mode"
         const val CONFIDENT_ONLY = "confident_only"
         const val CLIPBOARD = "clipboard"

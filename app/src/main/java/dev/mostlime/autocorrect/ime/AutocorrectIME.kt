@@ -99,7 +99,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                     val corr = EngineHolder.ensureLexicon(app)
                     val sc = EngineHolder.scorer?.takeIf { !it.step.closed }
                     sc?.lastCtxTokens = 0
-                    val res = corr.correctWord(req.input, sc, EngineHolder.params ?: DEFAULT_PARAMS, req.prev, merge = req.merge, formal = req.formal)
+                    val res = corr.correctWord(req.input, sc, EngineHolder.params ?: DEFAULT_PARAMS, req.prev, merge = req.merge, formal = req.formal,
+                        autoCap = req.autoCap)
                     if (sc != null && res.lmScored) res.ctxTokens = sc.lastCtxTokens
                     res
                 } catch (e: Throwable) {
@@ -257,7 +258,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         ctl.lettersLayer = v?.layer?.isLetters == true
         app.user.reloadIfChanged()   // the settings screen may have edited the dictionary
         ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME,
-            rewind = app.prefs.rewind, suggestOnly = app.prefs.suggestOnly, confidentOnly = app.prefs.confidentOnly))
+            suggestOnly = app.prefs.suggestOnly, confidentOnly = app.prefs.confidentOnly, autoCap = app.prefs.autoCap))
         root?.hidePanel()
         if (!app.prefs.clipboard) clips.clear()
         updateClipChip()

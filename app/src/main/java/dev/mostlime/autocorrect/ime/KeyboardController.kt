@@ -77,7 +77,8 @@ interface Timer {
     fun cancel(token: Any)
 }
 
-class CorrectionRequest(val id: Int, val input: WordInput, val prev: PrevWord?, val merge: MergeInput?, val formal: Boolean = false)
+class CorrectionRequest(val id: Int, val input: WordInput, val prev: PrevWord?, val merge: MergeInput?, val formal: Boolean = false,
+                        val autoCap: Boolean = true)
 
 /** Snapshot of the settings the controller needs (re-read at every input start). */
 class ControllerConfig(
@@ -92,6 +93,8 @@ class ControllerConfig(
     val suggestOnly: Boolean = false,
     /** auto-correct mode: unsure corrections (small margin) are underlined + suggested instead of applied */
     val confidentOnly: Boolean = false,
+    /** sentence-start capitals: auto-shift (following the field's CAP flags) and the corrector's sentence capitals */
+    val autoCap: Boolean = true,
 )
 
 /**
@@ -250,7 +253,8 @@ class KeyboardController(
                     if (stripMode != StripMode.NONE && stripMode != StripMode.TYPING) setStrip(emptyList(), -1, StripMode.NONE)
                     composing.append(c); touches.add(touch)
                     ed.setComposing(composing.toString())
-                    if (shift == Shift.ON) shift = Shift.OFF
+                    // ALL-CAPS fields (CAP_CHARACTERS) keep the shift on after each letter
+                    if (shift == Shift.ON && !(config.autoCap && config.policy.capChars)) shift = Shift.OFF
                     scheduleSuggest()
                 } else if (composing.isNotEmpty()) {
                     finishWord(ed, c, trigger = ch in WORD_END_PUNCT)
@@ -363,7 +367,7 @@ class KeyboardController(
         // keep at most MAX_PENDING corrections in flight (slow model + fast typing): the oldest gives way
         while (pendings.size > MAX_PENDING) { val old = pendings.removeAt(0); old.done = true; stats.dropped++ }
         val req = CorrectionRequest(id, WordInput(typed, tch, left, sep), prevWord, if (prevWord != null && p != null) MergeInput(p.typed, p.touches) else null,
-            formal = cfg.style == "formal" && !cfg.suggestOnly)
+            formal = cfg.style == "formal" && !cfg.suggestOnly, autoCap = cfg.autoCap)
         prev = null   // set again when this word's result is applied
         setStrip(emptyList(), -1, StripMode.NONE)
         showTypo()
@@ -860,7 +864,7 @@ class KeyboardController(
 
     fun autoShift() {
         if (shift == Shift.LOCK || !lettersLayer) return
-        val caps = config.policy.capSentences && (editor()?.capsMode() ?: false)
+        val caps = config.autoCap && config.policy.anyCaps && (editor()?.capsMode() ?: false)
         shift = if (caps) Shift.ON else Shift.OFF
     }
 
