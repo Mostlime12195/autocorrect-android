@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.HapticFeedbackConstants
@@ -67,13 +68,13 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private val rect = RectF()
 
     private val pressed = HashMap<Int, KeyDef>()   // pointer id -> key
-    private val handler = Handler(Looper.getMainLooper())
+    private val repeatHandler = Handler(Looper.getMainLooper())
     private var repeatKey: KeyDef? = null
     private val repeater = object : Runnable {
         override fun run() {
             val k = repeatKey ?: return
             listener.onKey(k, Touch.APOS)
-            handler.postDelayed(this, REPEAT_MS)
+            repeatHandler.postDelayed(this, REPEAT_MS)
         }
     }
     private var spaceDownAt = 0L
@@ -81,13 +82,15 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     init {
         setBackgroundColor(bg)
         setOnApplyWindowInsetsListener { _, insets ->
-            bottomInset = insets.getInsets(WindowInsets.Type.navigationBars()).bottom
-            requestLayout(); insets
+            val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+            else @Suppress("DEPRECATION") insets.systemWindowInsetBottom
+            if (b != bottomInset) { bottomInset = b; requestLayout() }
+            insets
         }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val w = View.MeasureSpec.getSize(widthMeasureSpec)
         keyW = w / 10f
         rowH = (keyW * 1.25f).coerceIn(46 * dp, 58 * dp)
         setMeasuredDimension(w, (stripH + 4 * rowH + 6 * dp).toInt() + bottomInset)
@@ -151,13 +154,13 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (haptics) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 if (k.type == KeyType.SPACE) spaceDownAt = e.eventTime
                 else listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k))
-                if (k.type == KeyType.BACKSPACE) { repeatKey = k; handler.postDelayed(repeater, REPEAT_START_MS) }
+                if (k.type == KeyType.BACKSPACE) { repeatKey = k; repeatHandler.postDelayed(repeater, REPEAT_START_MS) }
                 invalidate()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
                 val i = e.actionIndex
                 val k = pressed.remove(e.getPointerId(i))
-                if (k?.type == KeyType.BACKSPACE) { repeatKey = null; handler.removeCallbacks(repeater) }
+                if (k?.type == KeyType.BACKSPACE) { repeatKey = null; repeatHandler.removeCallbacks(repeater) }
                 if (k?.type == KeyType.SPACE && e.actionMasked != MotionEvent.ACTION_CANCEL) {
                     // space fires on release so a long press can open the keyboard switcher
                     if (e.eventTime - spaceDownAt > LONG_PRESS_MS) listener.onSwitchIme() else listener.onKey(k, Touch.APOS)
@@ -168,7 +171,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                     if (si < suggestions.size) listener.onSuggestion(si)
                 }
                 if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
-                    pressed.clear(); stripDown = -1f; repeatKey = null; handler.removeCallbacks(repeater)
+                    pressed.clear(); stripDown = -1f; repeatKey = null; repeatHandler.removeCallbacks(repeater)
                 }
                 invalidate()
             }
