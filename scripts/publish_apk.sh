@@ -36,17 +36,18 @@ else
     --notes "App APK for the in-app updater (the keyboard repo is private). $NOTES"
 fi
 URL="https://github.com/$PUB/releases/download/app-v$V/autocorrect-$V.apk"
-# the public URL must serve these bytes: ranged GETs of the first and last KiB (the CDN can cache a 404 for a while,
-# and a whole-file download from this host breaks off), plus GitHub's digest when it reports one
+# the public URL must serve these bytes. Wait for the upload to propagate first, and only ever probe cache-busted URLs:
+# a probe of the plain URL before propagation makes the CDN cache 404s for its chunks (that broke 0.1.54 past 10 MiB).
+sleep 20
+chunk() {  # chunk <from> <to> <try>: ranged GET of the cache-busted URL compared with the local bytes
+  local f="$TMP/chunk.bin" code
+  code=$(curl -sL --http1.1 -r "$1-$2" -o "$f" -w '%{http_code}' "$URL?cb=$RANDOM$RANDOM$3" || true)
+  [ "$code" = 206 ] && cmp -s "$f" <(tail -c +"$(($1 + 1))" "$APK" | head -c "$(($2 - $1 + 1))")
+}
+MID=$((SIZE / 2)); [ "$MID" -gt 10485760 ] || MID=$((10485760 + 4096))
 ok=0
 for i in 1 2 3 4 5 6 7 8 9 10; do
-  head_ok=0; tail_ok=0
-  code=$(curl -sL --http1.1 -r 0-1023 -o "$TMP/head.bin" -w '%{http_code}' "$URL?check=$i" || true)
-  [ "$code" = 206 ] && cmp -s "$TMP/head.bin" <(head -c 1024 "$APK") && head_ok=1
-  code=$(curl -sL --http1.1 -r "$((SIZE - 1024))-$((SIZE - 1))" -o "$TMP/tail.bin" -w '%{http_code}' "$URL?check=$i" || true)
-  [ "$code" = 206 ] && cmp -s "$TMP/tail.bin" <(tail -c 1024 "$APK") && tail_ok=1
-  code=$(curl -sL --http1.1 -r 0-15 -o /dev/null -w '%{http_code}' "$URL" || true)   # the plain URL apps will use
-  if [ "$head_ok" = 1 ] && [ "$tail_ok" = 1 ] && [ "$code" = 206 ]; then ok=1; break; fi
+  if chunk 0 1023 "$i" && chunk "$MID" "$((MID + 1023))" "$i" && chunk "$((SIZE - 1024))" "$((SIZE - 1))" "$i"; then ok=1; break; fi
   echo "asset not served correctly yet (try $i), waiting"; sleep 30
 done
 [ "$ok" = 1 ] || { echo "the public asset isn't served correctly: not writing latest.json"; exit 1; }
