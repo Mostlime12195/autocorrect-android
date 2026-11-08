@@ -22,7 +22,12 @@ APK="$TMP/autocorrect-$V.apk"
 SHA=$(sha256sum "$APK" | cut -d' ' -f1)
 SIZE=$(stat -c %s "$APK")
 COMMIT=$(gh release view "$TAG" -R "$REPO" --json targetCommitish --jq .targetCommitish)
-NOTES=$(gh api "repos/$REPO/commits/$COMMIT" --jq .commit.message | head -1)
+# notes: the commit subjects since the previous release (README-only commits left out)
+PREV=$(gh release list -R "$REPO" -L 20 --json tagName --jq '.[].tagName' | grep -A1 -x "$TAG" | tail -n +2 | head -1)
+if [ -n "$PREV" ]; then
+  NOTES=$(gh api "repos/$REPO/compare/$PREV...$TAG" --jq '.commits[].commit.message | split("\n")[0]' | grep -v '^README' | grep -v '^Merge' | paste -sd ';' | sed 's/;/; /g')
+fi
+[ -n "${NOTES:-}" ] || NOTES=$(gh api "repos/$REPO/commits/$COMMIT" --jq .commit.message | head -1)
 
 if gh release view "app-v$V" -R "$PUB" >/dev/null 2>&1; then
   gh release upload "app-v$V" "$APK" -R "$PUB" --clobber
