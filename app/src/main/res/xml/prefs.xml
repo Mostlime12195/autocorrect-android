@@ -9,6 +9,8 @@
             app:summary="Correct the word on space / punctuation. Backspace right after a correction undoes it." app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="rewind" app:title="Fix to/too, their/there… from later words" app:defaultValue="true"
             app:summary="When the model is very sure, re-check confusable words up to 3 words back" app:iconSpaceReserved="false" />
+ <SwitchPreferenceCompat app:key="clipboard" app:title="Clipboard suggestions and history" app:defaultValue="true"
+            app:summary="Offer recently copied text and keep the last 10 copies on this phone. Never from password or sensitive clips." app:iconSpaceReserved="false" />
         <ListPreference app:key="style" app:title="Style" app:defaultValue="standard"
             app:entries="@array/styles" app:entryValues="@array/style_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="haptics" app:title="Vibrate on key press" app:defaultValue="true" app:iconSpaceReserved="false" />

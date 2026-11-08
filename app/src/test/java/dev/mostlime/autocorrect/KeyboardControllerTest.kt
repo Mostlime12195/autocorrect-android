@@ -75,7 +75,7 @@ class KeyboardControllerTest {
             Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = doubleArrayOf(2.5, 7.5)))
         }
         val GOOD = setOf("the", "quick", "brown", "fox", "one", "more", "question", "that", "be", "only", "i", "have", "is", "it",
-            "keyboard", "guess", "fixed", "a", "lot", "contractions", "are")
+            "keyboard", "guess", "fixed", "a", "lot", "contractions", "are", "go", "home", "now")
         /** LM that likes common words in GOOD and dislikes everything else (summed over the continuation's words) */
         val lm = LmScorer { reqs -> DoubleArray(reqs.size) { i -> reqs[i].cont.trim().split(Regex("\\s+")).sumOf { w -> if (w.lowercase() in GOOD) -2.0 else -14.0 } } }
         val P = DecodeParams(lam = 1.25, bias = 0.0, margin = 0.0, lamR = 1.25)
@@ -303,6 +303,18 @@ class KeyboardControllerTest {
         engine.rewindLm = toThe
         engine.deliverRewinds()
         assertTrue(ed.text.toString(), ed.text.endsWith("too the "))
+    }
+
+    /** v0.1.35 emulator: "home nownow" -- an older result landed while the next word was still held (composing). */
+    @Test fun lateResultDuringFastHoldDoesNotDuplicate() {
+        timer.fastExpires = false
+        type("go hoem ")
+        timer.fireAll()                 // "hoem " committed as typed, its result still pending
+        type("now ")                    // "now" held (composing) for the fast hold
+        engine.deliver(2)               // "go", "hoem" results land during the hold
+        timer.fireAll()                 // hold expires: "now " committed
+        engine.deliver(engine.queue.size)
+        assertEquals(ed.visible.joinToString(" | "), "go home now ", ed.text.toString())
     }
 
     @Test fun passwordFieldsNeverCorrectOrLog() {

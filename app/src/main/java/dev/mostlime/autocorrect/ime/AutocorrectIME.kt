@@ -138,6 +138,34 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     }
 
     private lateinit var ctl: KeyboardController
+    private var root: KeyboardRoot? = null
+    private lateinit var clips: ClipStore
+    private val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener { onClipChanged() }
+
+    /** A new clip: keep it unless clipboard history is off, the clip is marked sensitive, or we're in a password /
+     *  incognito field. */
+    private fun onClipChanged() {
+        if (!app.prefs.clipboard) return
+        val pol = ctl.config.policy
+        if (pol.password || (pol.sensitive && pol.autocorrect)) return   // password or incognito field
+        val cm = getSystemService(android.content.ClipboardManager::class.java) ?: return
+        val clip = runCatching { cm.primaryClip }.getOrNull() ?: return
+        val ex = clip.description?.extras
+        if (ex != null && ex.getBoolean(ClipStore.EXTRA_IS_SENSITIVE, false)) return
+        val text = runCatching { clip.getItemAt(0)?.coerceToText(this)?.toString() }.getOrNull() ?: return
+        clips.add(text)
+        updateClipChip()
+    }
+
+    private fun updateClipChip() {
+        kv?.clipChip = if (app.prefs.clipboard && !ctl.config.policy.password) clips.recentOffer()?.text else null
+    }
+
+    private fun showClipboard() {
+        val r = root ?: return
+        val p = ClipboardPanel(this, Palette(this), clips, { t -> ctl.insertText(t); clips.consumeOffer(); r.hidePanel(); updateClipChip() }) { r.hidePanel() }
+        r.showPanel(p)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -146,9 +174,20 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
             app.events.append(toJson(e) as JsonObject)
         }
         EngineHolder.preload(this)
+        clips = ClipStore(java.io.File(filesDir, "clipboard.json"))
+        runCatching { getSystemService(android.content.ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener) }
     }
 
-    override fun onCreateInputView(): View = KeyboardView(this, this).also { kv = it }
+    override fun onDestroy() {
+        runCatching { getSystemService(android.content.ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener) }
+        super.onDestroy()
+    }
+
+    override fun onCreateInputView(): View {
+        val k = KeyboardView(this, this)
+        kv = k
+        return KeyboardRoot(this, k).also { root = it }
+    }
 
     override fun onStartInputView(editorInfo: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(editorInfo, restarting)
@@ -162,12 +201,16 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         v?.enterLabel = enterLabel(editorInfo)
         ctl.lettersLayer = v?.layer == KeyboardLayout.LETTERS
         ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME, rewind = app.prefs.rewind))
+        root?.hidePanel()
+        if (!app.prefs.clipboard) clips.clear()
+        updateClipChip()
         // cheap when loaded; picks up a model / style change or a finished download
         if (!EngineHolder.loading) EngineHolder.preload(this)
         updateStatus(null)
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        root?.hidePanel()
         ctl.finishInput()
         super.onFinishInputView(finishingInput)
     }
@@ -210,6 +253,15 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     override fun onSuggestion(index: Int) = ctl.pickSuggestion(index)
 
     override fun onAlternate(text: String) = ctl.replaceLastChar(text)
+
+    override fun onClipboard() = showClipboard()
+
+    override fun onPasteChip() {
+        val t = clips.recentOffer()?.text ?: return
+        ctl.insertText(t)
+        clips.consumeOffer()
+        updateClipChip()
+    }
 
     override fun onSettings() {
         startActivity(android.content.Intent(this, dev.mostlime.autocorrect.ui.SettingsActivity::class.java)

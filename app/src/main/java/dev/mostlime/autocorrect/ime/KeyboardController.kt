@@ -172,7 +172,7 @@ class KeyboardController(
     fun startInput(cfg: ControllerConfig) {
         flushLast()
         config = cfg
-        resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null
+        resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
         releaseHold()
         shift = Shift.OFF
         autoShift()
@@ -333,7 +333,7 @@ class KeyboardController(
         if (pd.uncommitted) {
             holding = true
             holdDone = { !pd.uncommitted }
-            holdToken = timer.post(FAST_HOLD_MS) { commitHeld(pd); releaseHold() }
+            holdToken = timer.post(FAST_HOLD_MS) { commitHeld(pd); flushDeferred(); releaseHold() }
         }
     }
 
@@ -347,8 +347,19 @@ class KeyboardController(
         autoShift()
     }
 
+    /** results that waited for a held word: run them now (never from inside another edit) */
+    private fun flushDeferred() {
+        if (deferred.isEmpty() || pendings.any { it.uncommitted }) return
+        val todo = ArrayList(deferred); deferred.clear()
+        for ((p, r) in todo) onCorrection(p, r)
+    }
+
+    /** results that arrived while a newer word was held (its text is still composing): applied once it's committed */
+    private val deferred = ArrayList<Pair<Pending, WordResult?>>()
+
     private fun onCorrection(pd: Pending, r: WordResult?) {
         if (pd.done) return
+        if (!pd.uncommitted && pendings.any { it.uncommitted }) { deferred.add(pd to r); return }
         pd.done = true
         pendings.remove(pd)
         try {
@@ -360,6 +371,7 @@ class KeyboardController(
                 autoShift()
             } else if (pd.valid) apply(pd, r) else { stats.dropped++; ui.onResult(r) }
         } finally {
+            flushDeferred()
             if (holding && holdDone()) releaseHold()
         }
         if (r != null && !r.cheap) scheduleRewind()   // the model is loaded (skipped words count too)
@@ -576,6 +588,19 @@ class KeyboardController(
     private fun capI(text: String): String {
         if (config.style == "casual") return text
         return text.split(' ').joinToString(" ") { w -> if (w in I_WORDS) "I" + w.substring(1) else w }
+    }
+
+    /** Paste / emoji: the word being typed stays as typed, then the text goes in at the cursor. */
+    fun insertText(t: String) {
+        if (holding) { held.add { insertText(t) }; return }
+        val ed = ed() ?: return
+        flushLast()
+        cancelSuggest()
+        if (composing.isNotEmpty()) { ed.commit(composing.toString()); resetWord() }
+        ed.commit(t)
+        prev = null
+        setStrip(emptyList(), -1, StripMode.NONE)
+        autoShift()
     }
 
     /** Long-press alternate: replaces the character the press already typed (é for e, 1 for q, ? for .). */

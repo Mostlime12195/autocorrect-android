@@ -59,7 +59,16 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         fun onSuggestion(index: Int)
         fun onSwitchIme()
         fun onSettings()
+        fun onClipboard() {}
+        fun onEmoji() {}
+        fun onPasteChip() {}
     }
+
+    /** text of a recently copied clip, offered as a chip in an empty strip (null = none) */
+    var clipChip: String? = null
+        set(v) { field = v; invalidate() }
+    val stripHeight get() = stripH
+    val bottomInsetPx get() = bottomInset
 
     var layer: Layer = KeyboardLayout.LETTERS
         set(v) { field = v; invalidate() }
@@ -144,6 +153,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private val icNext = icon(R.drawable.ms_next)
     private val icSettings = icon(R.drawable.ms_settings)
     private val icUndo = icon(R.drawable.ms_undo)
+    private val icPaste = icon(R.drawable.ms_paste)
+    private val icEmoji = icon(R.drawable.ms_emoji)
+    private val chipRect = RectF()
 
     // touch state
     private val pressed = HashMap<Int, KeyDef>()     // pointer id -> key
@@ -286,10 +298,34 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         val order = intArrayOf(1, 0, 2)   // best suggestion in the middle
         val t = ((now - stripChangedAt) / 140f).coerceIn(0f, 1f)
         if (t < 1f) anim = true
+        chipRect.setEmpty()
         if (suggestions.isEmpty()) {
+            // toolbar: settings, clipboard, emoji
             val sz = (22 * dp).toInt()
-            val l = (14 * dp).toInt(); val tp = ((stripH - sz) / 2).toInt()
-            icSettings.setBounds(l, tp, l + sz, tp + sz); icSettings.setTint(pal.dim); icSettings.draw(canvas)
+            val tp = ((stripH - sz) / 2).toInt()
+            for ((i, ic) in listOf(icSettings, icPaste, icEmoji).withIndex()) {
+                val l = (14 * dp + i * TOOL_W * dp).toInt()
+                ic.setBounds(l, tp, l + sz, tp + sz); ic.setTint(pal.dim); ic.alpha = 255; ic.draw(canvas)
+            }
+            val clip = clipChip
+            if (clip != null) {
+                // paste chip with the start of the copied text
+                stripPaint.typeface = Typeface.DEFAULT; stripPaint.color = pal.fg; stripPaint.textSize = 14 * dp
+                var label = clip.replace('\n', ' ').trim()
+                val maxW = width - (14 + 3 * TOOL_W + 24) * dp - 40 * dp
+                if (stripPaint.measureText(label) > maxW) { while (label.length > 3 && stripPaint.measureText("$label…") > maxW) label = label.dropLast(1); label += "…" }
+                val tw = stripPaint.measureText(label) + 40 * dp
+                val right = width - 10 * dp
+                chipRect.set(right - tw, 8 * dp, right, stripH - 8 * dp)
+                keyPaint.color = pal.accentSoft
+                canvas.drawRoundRect(chipRect, chipRect.height() / 2, chipRect.height() / 2, keyPaint)
+                val isz = (16 * dp).toInt()
+                val l = (chipRect.left + 10 * dp).toInt(); val t2 = (chipRect.centerY() - isz / 2).toInt()
+                icPaste.setBounds(l, t2, l + isz, t2 + isz); icPaste.setTint(pal.fg); icPaste.draw(canvas)
+                stripPaint.textAlign = Paint.Align.LEFT
+                canvas.drawText(label, chipRect.left + 30 * dp, stripH / 2 + 5 * dp, stripPaint)
+                stripPaint.textAlign = Paint.Align.CENTER; stripPaint.textSize = 17 * dp
+            }
         }
         for ((cell, si) in order.withIndex()) {
             val s = suggestions.getOrNull(si) ?: continue
@@ -434,7 +470,13 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 }
                 if (k == null && e.actionMasked == MotionEvent.ACTION_UP && e.getY(i) < stripH && stripDown >= 0) {
                     if (suggestions.isEmpty()) {
-                        if (e.getX(i) < 56 * dp) listener.onSettings()
+                        val x = e.getX(i)
+                        when {
+                            !chipRect.isEmpty && chipRect.contains(x, e.getY(i)) -> { buzz(); listener.onPasteChip() }
+                            x < (14 + TOOL_W - 4) * dp -> listener.onSettings()
+                            x < (14 + 2 * TOOL_W - 4) * dp -> listener.onClipboard()
+                            x < (14 + 3 * TOOL_W - 4) * dp -> listener.onEmoji()
+                        }
                     } else {
                         val cell = (e.getX(i) / (width / 3f)).toInt().coerceIn(0, 2)
                         val si = intArrayOf(1, 0, 2)[cell]
@@ -460,5 +502,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         const val REPEAT_START_MS = 400L
         const val LONG_PRESS_MS = 500L
         const val LONG_PRESS_ALT_MS = 380L
+        /** strip toolbar slot width (dp) */
+        const val TOOL_W = 44f
     }
 }
