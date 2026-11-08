@@ -100,7 +100,9 @@ object EngineHolder {
             val tok = SPTokenizer.fromJson(app.store.file(want.vocab).readText())
             val f = app.store.file(want.graph)
             val buf = RandomAccessFile(f, "r").use { it.channel.map(FileChannel.MapMode.READ_ONLY, 0, it.length()) }
-            val step = StepModel.open(OrtEnvironment.getEnvironment(), buf, want.meta, threads = 2,
+            val env = OrtEnvironment.getEnvironment()
+            runCatching { env.disableTelemetryEvents() }
+            val step = StepModel.open(env, buf, want.meta, threads = 2,
                 ortFormat = want.format == "ort", extraConfig = want.sessionConfig)
             withContext(dispatcher) {
                 release()

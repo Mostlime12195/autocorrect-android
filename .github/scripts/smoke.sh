@@ -7,8 +7,13 @@ PKG=dev.mostlime.autocorrect
 IME=$PKG/.ime.AutocorrectIME
 mkdir -p smoke
 adb install -r -g "$APK"
-adb shell ime enable $IME
+# the input method service may take a moment to see a freshly installed IME
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  adb shell ime enable $IME 2>&1 | grep -q "cannot" || break
+  sleep 3
+done
 adb shell ime set $IME
+adb shell ime list -s
 adb logcat -c
 adb shell am start -W -n $PKG/.ui.SettingsActivity
 sleep 8
