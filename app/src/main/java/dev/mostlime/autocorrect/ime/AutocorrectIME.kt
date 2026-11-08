@@ -15,6 +15,7 @@ import dev.mostlime.autocorrect.engine.DecodeParams
 import dev.mostlime.autocorrect.engine.Rewind
 import dev.mostlime.autocorrect.engine.RewindChange
 import dev.mostlime.autocorrect.engine.RewindTarget
+import dev.mostlime.autocorrect.engine.SwipeResult
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordResult
 import kotlinx.coroutines.Job
@@ -111,6 +112,22 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                     Rewind.check(targets, sc, (EngineHolder.params ?: DEFAULT_PARAMS).lamRe, Rewind.MARGIN)
                 }.getOrDefault(emptyList())
                 main.post { done(ch) }
+            }
+        }
+
+        override fun swipe(req: SwipeRequest, done: (SwipeResult?) -> Unit) {
+            EngineHolder.scope.launch {
+                val r = try {
+                    val dec = EngineHolder.ensureSwipe(app)
+                    val sc = EngineHolder.scorer?.takeIf { !it.step.closed }
+                    dec.decodeAndRerank(req.path, req.left, req.sep, req.casePattern, sc)
+                } catch (e: Throwable) {
+                    Log.e(TAG, "swipe failed", e); null
+                }
+                // timing only, never the text
+                if (r != null) Log.i(TAG, "swipe -> decode ${"%.0f".format(r.decodeMs)}ms (${r.nSurvivors} templates) " +
+                    (if (r.lm != null) "LM ${"%.0f".format(r.lmMs)}ms ${r.cands.size} cands" else "no LM") + " pts ${req.path.size}")
+                main.post { done(r) }
             }
         }
 
@@ -218,6 +235,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         val policy = FieldPolicy.of(editorInfo)
         val v = kv
         v?.haptics = app.prefs.haptics
+        v?.swipeEnabled = app.prefs.swipe && policy.autocorrect
         v?.hapticStrength = app.prefs.hapticStrength
         v?.heightScale = app.prefs.heightPercent / 100f
         v?.baseRows = letters().rows
@@ -275,6 +293,10 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onSuggestion(index: Int) = ctl.pickSuggestion(index)
+
+    override fun onSwipeStart() = ctl.swipeBegin()
+
+    override fun onSwipe(path: List<Touch>) = ctl.swipe(path)
 
     override fun onAlternate(text: String) = ctl.replaceLastChar(text)
 

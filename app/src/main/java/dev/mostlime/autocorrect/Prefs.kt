@@ -26,6 +26,7 @@ class Prefs(private val ctx: Context) {
     val style get() = sp.getString(STYLE, "standard") ?: "standard"
     val autocorrect get() = sp.getBoolean(AUTOCORRECT, true)
     val rewind get() = sp.getBoolean(REWIND, true)
+    val swipe get() = sp.getBoolean(SWIPE, true)
     val clipboard get() = sp.getBoolean(CLIPBOARD, true)
     val numberRow get() = sp.getBoolean(NUMBER_ROW, false)
     val heightPercent get() = sp.getInt(HEIGHT, 100).coerceIn(80, 130)
@@ -54,6 +55,7 @@ class Prefs(private val ctx: Context) {
         const val STYLE = "style"
         const val AUTOCORRECT = "autocorrect"
         const val REWIND = "rewind"
+        const val SWIPE = "swipe_typing"
         const val CLIPBOARD = "clipboard"
         const val NUMBER_ROW = "number_row"
         const val HEIGHT = "kb_height"

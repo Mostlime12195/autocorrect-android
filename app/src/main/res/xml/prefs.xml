@@ -7,6 +7,8 @@
     <PreferenceCategory app:title="Typing" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat app:key="autocorrect" app:title="Autocorrect" app:defaultValue="true"
             app:summary="Correct the word on space / punctuation. Backspace right after a correction undoes it." app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="swipe_typing" app:title="Swipe typing" app:defaultValue="true"
+            app:summary="Slide across the letters to type a word. The strip shows alternatives; backspace right after removes it." app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="rewind" app:title="Fix to/too, their/there… from later words" app:defaultValue="true"
             app:summary="When the model is very sure, re-check confusable words up to 3 words back" app:iconSpaceReserved="false" />
  <SwitchPreferenceCompat app:key="clipboard" app:title="Clipboard suggestions and history" app:defaultValue="true"

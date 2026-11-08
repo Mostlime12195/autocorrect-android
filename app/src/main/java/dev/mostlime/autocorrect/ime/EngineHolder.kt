@@ -13,6 +13,7 @@ import dev.mostlime.autocorrect.engine.NeuralScorer
 import dev.mostlime.autocorrect.engine.SPTokenizer
 import dev.mostlime.autocorrect.engine.SpatialModel
 import dev.mostlime.autocorrect.engine.StepModel
+import dev.mostlime.autocorrect.engine.SwipeDecoder
 import dev.mostlime.autocorrect.model.ModelSpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +48,10 @@ object EngineHolder {
         private set
     @Volatile var scorer: NeuralScorer? = null
         private set
+    /** swipe templates (~12 MB), built from the lexicon on the engine thread the first time swipe typing is used */
+    @Volatile var swipe: SwipeDecoder? = null
+        private set
+    @Volatile var swipeBuildMs = -1L
     @Volatile var spec: ModelSpec? = null
         private set
     @Volatile var params: DecodeParams? = null
@@ -71,7 +76,11 @@ object EngineHolder {
     /** Async, idempotent: lexicon (engine thread), then the active model's session (loader thread). */
     fun preload(ctx: Context) {
         val app = ctx.applicationContext as App
-        scope.launch { ensureLexicon(app) }
+        scope.launch {
+            val c = ensureLexicon(app)
+            // templates take ~1-2 s to build: on the loader thread, so word-end corrections don't queue behind it
+            if (app.prefs.swipe && swipe == null) loaderScope.launch { buildSwipe(c) }
+        }
         loaderScope.launch { ensureLoaded(app) }
     }
 
@@ -90,6 +99,22 @@ object EngineHolder {
             Log.i(TAG, "lexicon ${lex.size} words in $lexiconMs ms")
         }
         return corrector!!
+    }
+
+    private val swipeLock = Any()
+
+    /** Engine thread: the swipe decoder (templates from the same lexicon as the corrector); waits for a build in progress. */
+    fun ensureSwipe(app: App): SwipeDecoder = swipe ?: buildSwipe(ensureLexicon(app))
+
+    /** Any thread (the lexicon is immutable once built). */
+    private fun buildSwipe(c: Corrector): SwipeDecoder = synchronized(swipeLock) {
+        swipe?.let { return it }
+        val t0 = App.now()
+        val d = SwipeDecoder(c.gen.lex)
+        swipeBuildMs = App.now() - t0
+        Log.i(TAG, "swipe templates ${d.tp.count} in $swipeBuildMs ms")
+        swipe = d
+        d
     }
 
     /** Loader thread: the active model's session (no-op when it is already loaded). Swapped in on the engine thread. */
