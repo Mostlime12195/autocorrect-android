@@ -21,6 +21,7 @@ import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.BuildConfig
 import dev.mostlime.autocorrect.Prefs
 import dev.mostlime.autocorrect.R
+import dev.mostlime.autocorrect.log.LogStats
 import dev.mostlime.autocorrect.log.UploadWorker
 import dev.mostlime.autocorrect.model.DownloadWorker
 import kotlinx.coroutines.Dispatchers

@@ -16,7 +16,7 @@ class Prefs(private val ctx: Context) {
      */
     @Suppress("DEPRECATION")
     fun reload() {
-        sp = ctx.getSharedPreferences(PreferenceManager.getDefaultSharedPreferencesName(ctx), Context.MODE_MULTI_PROCESS)
+        sp = ctx.getSharedPreferences(ctx.packageName + "_preferences", Context.MODE_MULTI_PROCESS)
     }
 
     var model: String
