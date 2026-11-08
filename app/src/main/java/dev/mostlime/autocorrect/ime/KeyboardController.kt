@@ -7,6 +7,7 @@ import dev.mostlime.autocorrect.engine.RewindChange
 import dev.mostlime.autocorrect.engine.RewindTarget
 import dev.mostlime.autocorrect.engine.SEG
 import dev.mostlime.autocorrect.engine.Slot
+import dev.mostlime.autocorrect.engine.SwipeResult
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordInput
 import dev.mostlime.autocorrect.engine.WordResult
@@ -41,6 +42,8 @@ interface CorrectionEngine {
     fun cancelQueued()
     /** confusion-set rewind (needs the model; done(empty) without one) */
     fun rewind(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) = done(emptyList())
+    /** swipe: geometry decode + LM rerank of the gesture (done(null) when unavailable) */
+    fun swipe(req: SwipeRequest, done: (SwipeResult?) -> Unit) = done(null)
 }
 
 /** a word of the committed text marked as a likely typo: [start, start + len) of the text, best fixes first */
@@ -58,6 +61,9 @@ interface Learning {
     /** -> spelling undos of this typed word so far */
     fun noteSpellingUndo(typed: String): Int = 0
 }
+
+/** A finished swipe gesture: path in model units, the LM context, and the case pattern for the word ("A" shift, "AA" caps lock). */
+class SwipeRequest(val path: List<Touch>, val left: String, val sep: String, val casePattern: String)
 
 interface ControllerUi {
     /** undo = index of the word as typed after a correction (drawn as an undo chip), -1 if none */
@@ -131,10 +137,11 @@ class KeyboardController(
     private var lastShiftTap = 0L
     var lettersLayer = true
 
+    /** The last word put in by a correction, a strip pick or a swipe (typed == "" for a swipe; lead = its auto space). */
     private class Last(
         val typed: String, val touches: List<Touch>, val out: String, val sepText: String, val result: WordResult?,
-        var event: MutableMap<String, Any?>?, val undoPrefix: String,
-    )
+        var event: MutableMap<String, Any?>?, val undoPrefix: String, val lead: String = "",
+    ) { val swiped get() = typed.isEmpty() }
     private var last: Last? = null
 
     private class Prev(val slot: Slot, var idx: Int, var out: String, val lmScored: Boolean, val typed: String, val touches: List<Touch>,
@@ -203,6 +210,18 @@ class KeyboardController(
     private var suggestToken: Any? = null
     private var suggestSeq = 0
 
+    // swipe typing
+    /** the letter the last key press appended (a swipe that starts on that key takes it back) */
+    private class LetterPress(val shiftBefore: Shift, val len: Int)
+    private var lastPress: LetterPress? = null
+    /** shift state when the current gesture's first key went down */
+    private var swipeShift: Shift? = null
+    /** id of the swipe being decoded (0 = none); a result for another id is dropped */
+    private var swipePending = 0
+    private var nextSwipeId = 1
+    /** the text ends with the auto space after a swiped word: punctuation typed next goes before it */
+    private var swipeSpace = false
+
     var stats = Stats()
     class Stats { var applied = 0; var dropped = 0; var unchanged = 0 }
 
@@ -212,6 +231,7 @@ class KeyboardController(
         config = cfg
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
         typo = null; dictAdded = null
+        lastPress = null; swipeShift = null; swipePending = 0; swipeSpace = false
         releaseHold()
         shift = Shift.OFF
         autoShift()
@@ -242,9 +262,13 @@ class KeyboardController(
     fun key(k: KeyDef, touch: Touch) {
         if (holding) { held.add { key(k, touch) }; return }
         val ed = ed() ?: return
+        lastPress = null
+        val afterSwipe = swipeSpace
+        swipeSpace = false
         when (k.type) {
             KeyType.CHAR -> {
                 var c = k.text
+                val shiftBefore = shift
                 if (shift != Shift.OFF) c = c.uppercase()
                 val ch = c[0]
                 val letter = ch in 'a'..'z' || ch in 'A'..'Z' || (Character.isLetter(ch) && composing.isNotEmpty())
@@ -256,8 +280,16 @@ class KeyboardController(
                     // ALL-CAPS fields (CAP_CHARACTERS) keep the shift on after each letter
                     if (shift == Shift.ON && !(config.autoCap && config.policy.capChars)) shift = Shift.OFF
                     scheduleSuggest()
+                    lastPress = LetterPress(shiftBefore, composing.length)
                 } else if (composing.isNotEmpty()) {
                     finishWord(ed, c, trigger = ch in WORD_END_PUNCT)
+                } else if (afterSwipe && ch in SWIPE_PUNCT && ed.textBefore(1) == " " && !ed.hasSelection()) {
+                    // "word " + "." -> "word. " (the swiped word's auto space moves after the punctuation)
+                    flushLast()
+                    ed.beginBatch(); ed.deleteBefore(1); ed.commit("$c "); ed.endBatch()
+                    swipeSpace = true
+                    setStrip(emptyList(), -1, StripMode.NONE)
+                    autoShift()
                 } else {
                     flushLast()
                     ed.commit(c)
@@ -309,7 +341,15 @@ class KeyboardController(
         val l = last
         if (l != null) {
             val tail = l.out + l.sepText
-            if (ed.textBefore(tail.length) == tail && !ed.hasSelection()) {
+            if (l.swiped && ed.textBefore(l.lead.length + tail.length) == l.lead + tail && !ed.hasSelection()) {
+                // backspace right after a swipe removes the whole word (and its auto space)
+                ed.deleteBefore(l.lead.length + tail.length)
+                last = null; prev = null
+                setStrip(emptyList(), -1, StripMode.NONE)
+                autoShift()
+                return
+            }
+            if (!l.swiped && ed.textBefore(tail.length) == tail && !ed.hasSelection()) {
                 // undo: back to exactly what was typed, kept as typed at the next word end
                 ed.beginBatch()
                 ed.deleteBefore(tail.length)
@@ -594,6 +634,7 @@ class KeyboardController(
     fun pickSuggestion(i: Int) {
         if (holding) { held.add { pickSuggestion(i) }; return }
         val ed = ed() ?: return
+        lastPress = null
         val pick = shown.getOrNull(i) ?: return
         when (stripMode) {
             StripMode.TYPING -> {
@@ -624,9 +665,11 @@ class KeyboardController(
                 ed.endBatch()
                 val e = l.event ?: if (!config.policy.sensitive && l.result != null) baseEvent("autocorrect", l.typed, l.touches) else null
                 e?.let { it["outcome"] = if (pick == l.typed) "undone" else "strip_pick"; it["final"] = pick; write(it) }
-                last = null
-                if (pick == l.typed && l.result != null) learnFromUndo(l.undoPrefix + l.typed, l.out, l.event)
+                // a swiped word stays removable with one backspace after a pick from its alternates
+                last = if (l.swiped) Last("", emptyList(), pick, l.sepText, null, null, "", l.lead) else null
+                if (pick == l.typed && l.result != null && !l.swiped) learnFromUndo(l.undoPrefix + l.typed, l.out, l.event)
                 prev?.let { pv -> val k = pv.slot.cands.indexOf(pick); if (k >= 0) { pv.idx = k; pv.out = pick } else prev = null }
+                if (l.swiped) { swipeSpace = l.sepText == " "; autoShift() }
                 setStrip(emptyList(), -1, StripMode.NONE)
             }
             StripMode.REWIND -> {
@@ -804,6 +847,7 @@ class KeyboardController(
     fun insertText(t: String) {
         if (holding) { held.add { insertText(t) }; return }
         val ed = ed() ?: return
+        lastPress = null; swipeSpace = false
         flushLast()
         cancelSuggest()
         if (composing.isNotEmpty()) { ed.commit(composing.toString()); resetWord() }
@@ -831,6 +875,82 @@ class KeyboardController(
         ed.beginBatch(); ed.deleteBefore(1); ed.commit(alt0); ed.endBatch()
         if (pd != null && pd.valid && pd.anchor == pos && pd.sepText.length == 1) pd.sepText = alt0
         autoShift()
+    }
+
+    // ------------------------------------------------------------------ swipe typing
+    /**
+     * The view decided the current touch is a swipe: take back the letter its first key press typed (keys fire on
+     * press so taps stay instant) and remember the shift state from before that press.
+     */
+    fun swipeBegin() {
+        if (holding) { held.add { swipeBegin() }; return }
+        val lp = lastPress
+        lastPress = null
+        swipeShift = lp?.shiftBefore ?: shift
+        val ed = ed() ?: return
+        if (lp == null || composing.length != lp.len) return
+        cancelSuggest()
+        composing.setLength(composing.length - 1)
+        if (touches.isNotEmpty()) touches.removeAt(touches.size - 1)
+        if (composing.isEmpty()) { ed.commit(""); setStrip(emptyList(), -1, StripMode.NONE) } else ed.setComposing(composing.toString())
+        shift = lp.shiftBefore
+    }
+
+    /**
+     * A finished swipe (path in model units). A word being typed is finished first (normal autocorrect); the swiped word
+     * goes in with an auto space before it (unless the text already ends in a space / opening bracket) and a space after
+     * it. Keys typed while it decodes are held and replayed after it, like the fast hold at word end.
+     */
+    fun swipe(path: List<Touch>) {
+        if (holding) { held.add { swipe(path) }; return }
+        val ed = ed() ?: return
+        lastPress = null; swipeSpace = false
+        flushLast()
+        cancelSuggest()
+        if (composing.isNotEmpty()) {
+            finishWord(ed, " ", trigger = true)
+            if (holding) { held.add { swipe(path) }; return }
+        }
+        val raw = ed.textBefore(CTX_CHARS)
+        val lead = if (raw.isNotEmpty() && !raw.last().isWhitespace() && raw.last() !in NO_SPACE_AFTER) " " else ""
+        val (left, sep) = splitLeft(raw + lead)
+        val sh = swipeShift ?: shift
+        swipeShift = null
+        val case = when (sh) { Shift.LOCK -> "AA"; Shift.ON -> "A"; Shift.OFF -> "" }
+        val id = nextSwipeId++
+        swipePending = id
+        setStrip(emptyList(), -1, StripMode.NONE)
+        holding = true
+        holdDone = { swipePending == 0 }
+        holdToken = timer.post(SWIPE_HOLD_MS) { if (swipePending == id) swipePending = 0; releaseHold() }
+        engine.swipe(SwipeRequest(path, left, sep, case)) { r -> onSwipe(id, lead, r) }
+    }
+
+    private fun onSwipe(id: Int, lead: String, r: SwipeResult?) {
+        if (id != swipePending) return    // timed out (its hold was released) or superseded
+        swipePending = 0
+        try {
+            val word = r?.best ?: return
+            val ed = ed() ?: return
+            if (ed.hasSelection()) return
+            val out = capI(word)
+            ed.commit(lead + out + " ")
+            val geo = r.geoBest?.let(::capI)
+            val strip = r.ranked(3).map(::capI).distinct().toMutableList()
+            // the geometry-only word, when the LM overruled it, is the undo chip (like the word as typed after a correction)
+            var undo = -1
+            if (geo != null && geo != out) {
+                if (geo !in strip) { if (strip.size >= 3) strip[2] = geo else strip.add(geo) }
+                undo = strip.indexOf(geo)
+            }
+            last = Last("", emptyList(), out, " ", null, null, "", lead)
+            prev = null
+            swipeSpace = true
+            autoShift()
+            setStrip(strip, strip.indexOf(out), StripMode.LAST_WORD, undo = undo)
+        } finally {
+            releaseHold()
+        }
     }
 
     // ------------------------------------------------------------------ strip while typing (cheap path, debounced)
@@ -916,6 +1036,12 @@ class KeyboardController(
         const val MAX_AFTER = 120L
         const val SUGGEST_DEBOUNCE_MS = 60L
         const val DOUBLE_TAP_MS = 350L
+        /** a swipe whose decode takes longer than this is dropped and held keys go through */
+        const val SWIPE_HOLD_MS = 1500L
+        /** punctuation that takes the swiped word's auto space: "word ." -> "word. " */
+        const val SWIPE_PUNCT = ".,!?;:"
+        /** no auto space before a swiped word after these */
+        const val NO_SPACE_AFTER = "([{/@#\"'-_\n"
         val WORD_RE = Regex("[A-Za-z]+(?:'[A-Za-z]+)*'?")
         const val WORD_END_PUNCT = ".,!?;:)\""
         val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")

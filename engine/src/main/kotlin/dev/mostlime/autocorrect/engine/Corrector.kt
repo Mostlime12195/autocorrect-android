@@ -350,7 +350,12 @@ class Corrector(
     companion object {
         private const val SENT_END = ".?!"
         private val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")
-        private val PUNCT = listOf("." to "punct", "?" to "punct", "!" to "punct", "," to "comma")
+        /**
+         * Punctuation the per-word pass may add after the previous word: only commas. One word of right context can't
+         * tell a sentence end ("It does. My commas" for "It does my commas"); . ? ! belong to a pass over the whole
+         * sentence.
+         */
+        private val PUNCT = listOf("," to "comma")
         private fun cap1(s: String) = s.take(1).uppercase() + s.drop(1)
         private fun isLower(c: String) = c.isNotEmpty() && c != c.uppercase() && c == c.lowercase()
         private fun sentStart(text: String): Boolean {

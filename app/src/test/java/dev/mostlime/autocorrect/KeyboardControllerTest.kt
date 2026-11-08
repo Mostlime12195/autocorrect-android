@@ -12,6 +12,8 @@ import dev.mostlime.autocorrect.engine.Rewind
 import dev.mostlime.autocorrect.engine.RewindChange
 import dev.mostlime.autocorrect.engine.RewindTarget
 import dev.mostlime.autocorrect.engine.SpatialModel
+import dev.mostlime.autocorrect.engine.SwipeCand
+import dev.mostlime.autocorrect.engine.SwipeResult
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordResult
 import dev.mostlime.autocorrect.ime.ControllerConfig
@@ -25,6 +27,7 @@ import dev.mostlime.autocorrect.ime.KeyType
 import dev.mostlime.autocorrect.ime.KeyboardController
 import dev.mostlime.autocorrect.ime.KeyboardLayout
 import dev.mostlime.autocorrect.ime.Shift
+import dev.mostlime.autocorrect.ime.SwipeRequest
 import dev.mostlime.autocorrect.ime.Timer
 import dev.mostlime.autocorrect.ime.TypoMark
 import org.junit.Assert.assertEquals
@@ -104,6 +107,16 @@ class KeyboardControllerTest {
         override fun rewind(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) { rewinds.add(targets to done) }
         fun deliverRewinds() {
             while (rewinds.isNotEmpty()) { val (t, d) = rewinds.removeAt(0); d(Rewind.check(t, rewindLm, 1.25)) }
+        }
+        val swipes = ArrayList<Pair<SwipeRequest, (SwipeResult?) -> Unit>>()
+        override fun swipe(req: SwipeRequest, done: (SwipeResult?) -> Unit) { swipes.add(req to done) }
+        /** deliver the oldest swipe: words best-first by geometry, `best` = the index the LM picked */
+        fun deliverSwipe(words: List<String>, best: Int = 0) {
+            val (req, done) = swipes.removeAt(0)
+            val cands = words.mapIndexed { i, w -> SwipeCand(dev.mostlime.autocorrect.engine.applyCase(w, req.casePattern), i, -i.toDouble(), 0.0, 0.0, 0.0) }
+            val order = (listOf(best) + cands.indices.filter { it != best }).toIntArray()
+            val scores = DoubleArray(cands.size) { i -> -order.indexOf(i).toDouble() }
+            done(SwipeResult(cands, null, scores, order, 1.0, 0.0, 10))
         }
         fun deliver(n: Int = queue.size) {
             repeat(n) {
@@ -335,5 +348,71 @@ class KeyboardControllerTest {
         assertEquals(0, engine.requests.size)
         assertEquals("teh ", ed.text.toString())
         assertTrue(events.isEmpty())
+    }
+
+    // ---------------------------------------------------------------- swipe typing
+    private val path = listOf(Touch(1.5, 0.7), Touch(5.0, 0.7), Touch(8.5, 0.7))
+
+    /** a swipe that starts on key c: the press types c, the view then reports the swipe */
+    private fun swipe(start: Char) {
+        ctl.key(keyFor(start), KeyGeom.center(start)!!)
+        ctl.swipeBegin()
+        ctl.swipe(path)
+    }
+
+    @Test fun swipeInsertsWordWithSpaceAndPunctuationTakesTheSpace() {
+        ed.text.append("hello ")
+        swipe('w')
+        assertEquals("hello ", ed.text.toString())          // the press's letter was taken back
+        val req = engine.swipes.first().first
+        assertEquals("hello", req.left); assertEquals(" ", req.sep); assertEquals("", req.casePattern)
+        engine.deliverSwipe(listOf("world", "word", "wild"))
+        assertEquals("hello world ", ed.text.toString())
+        assertEquals(listOf("world", "word", "wild"), ctl.shown)
+        type(".")
+        assertEquals("hello world. ", ed.text.toString())
+    }
+
+    @Test fun swipeAddsLeadingSpaceAndBackspaceRemovesWholeWord() {
+        ed.text.append("ok.")
+        swipe('y')
+        assertEquals(". ", engine.swipes.first().first.sep)    // sep = everything between the previous word and this one
+        engine.deliverSwipe(listOf("yes", "yea"))
+        assertEquals("ok. yes ", ed.text.toString())
+        type("\b")
+        assertEquals("ok.", ed.text.toString())
+    }
+
+    @Test fun swipeAlternativeFromStripReplacesWordAndLmOverruleGetsUndoChip() {
+        ed.text.append("the ")
+        swipe('w')
+        engine.deliverSwipe(listOf("word", "world", "wild"), best = 1)   // the LM picked the geometry runner-up
+        assertEquals("the world ", ed.text.toString())
+        assertEquals("world", ctl.shown[0])
+        assertTrue(ctl.shown.contains("word"))
+        ctl.pickSuggestion(ctl.shown.indexOf("word"))
+        assertEquals("the word ", ed.text.toString())
+        type("\b")                                          // still one backspace to remove the swiped word
+        assertEquals("the ", ed.text.toString())
+    }
+
+    @Test fun swipeWithShiftCapitalisesAndHoldsKeysTypedMeanwhile() {
+        ctl.shift = Shift.ON
+        swipe('h')
+        assertEquals(Shift.ON, ctl.shift)                    // the press's shift-off was taken back too
+        assertEquals("A", engine.swipes.first().first.casePattern)
+        type("ok")                                           // typed while the swipe decodes: held
+        assertEquals("", ed.text.toString())
+        engine.deliverSwipe(listOf("hello"))
+        assertEquals("Hello ok", ed.text.toString())
+    }
+
+    @Test fun swipeFinishesTheWordBeingTyped() {
+        timer.fastExpires = false
+        type("teh")
+        swipe('q')
+        engine.deliver()                                     // "teh" corrected and committed first
+        engine.deliverSwipe(listOf("quick"))
+        assertEquals("the quick ", ed.text.toString())
     }
 }

@@ -30,6 +30,15 @@ class UserDataTest {
         dir.deleteRecursively()
     }
 
+    @Test fun dictionaryWordsAreSwipeTargets() {
+        val u = UserData(null, null)
+        val d = SwipeDecoder(Fixtures.gen.lex).also { it.user = u }
+        val path = KeyGeom.keyTouches("zorbix")
+        assertTrue(d.decode(path).none { it.word == "zorbix" })
+        u.add("Zorbix")
+        assertEquals("Zorbix", d.decode(path).first().word)
+    }
+
     @Test fun suppressionsExpire() {
         var t = 1_000_000L
         val u = UserData(null, null) { t }
@@ -48,6 +57,26 @@ class UserDataTest {
         assertEquals("hello", c.correctWord(WordInput("hello", null, "", ""), lm, p, null, formal = true, autoCap = false).out)
         // i -> I is not a sentence capital: it stays with the style
         assertEquals("I", c.correctWord(WordInput("i", null, "so", " "), lm, p, null, formal = true, autoCap = false).out)
+    }
+
+    /** formal step D used to put a full stop after "does" from one word of right context */
+    @Test fun formalNeverEndsASentenceMidWay() {
+        val c = Corrector(Fixtures.gen, Fixtures.gen2)
+        // an LM that loves a sentence break after "does"
+        val lm = LmScorer { reqs -> DoubleArray(reqs.size) { i -> val t = reqs[i].left + reqs[i].cont; if ("does." in t || "does!" in t || "does?" in t) -1.0 else -8.0 } }
+        val p = DecodeParams(1.25, 0.0, 0.0, 1.25)
+        val words = "it does my commas for me".split(' ')
+        val outs = ArrayList<String>()
+        var prev: PrevWord? = null
+        for ((t, w) in words.withIndex()) {
+            val left = outs.joinToString(" ")
+            val r = c.correctWord(WordInput(w, null, left, if (t == 0) "" else " "), lm, p, prev, formal = true)
+            if (r.prevText != null) outs[t - 1] = r.prevText!!
+            outs.add(r.out)
+            prev = PrevWord(r.slot, r.chosen, outs.dropLast(1).joinToString(" "), if (t == 0) "" else " ", r.lmScored, r.margin, r.scores)
+        }
+        val text = outs.joinToString(" ")
+        assertFalse(text.contains('.') || text.contains('!') || text.contains('?'), text)
     }
 
     @Test fun dictionaryWordsAreKeptByTheCorrector() {

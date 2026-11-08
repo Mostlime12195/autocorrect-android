@@ -21,6 +21,7 @@ import android.view.View
 import android.view.WindowInsets
 import androidx.core.content.ContextCompat
 import dev.mostlime.autocorrect.R
+import dev.mostlime.autocorrect.engine.KeyGeom
 import dev.mostlime.autocorrect.engine.Touch
 import kotlin.math.min
 
@@ -67,6 +68,10 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         fun onPasteChip() {}
         /** long-press on comma: emoji (the comma the press typed is taken back) */
         fun onCommaLongPress() {}
+        /** the touch that started on a letter became a swipe (the letter its press typed must be taken back) */
+        fun onSwipeStart() {}
+        /** the swipe ended: path in model units (key widths, rows x ROW_H), letter area only */
+        fun onSwipe(path: List<Touch>) {}
     }
 
     /** text of a recently copied clip, offered as a chip in an empty strip (null = none) */
@@ -90,6 +95,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     /** editor action label from the IME (Go / Search / Send / Next / Done / Prev / ⏎) */
     var enterLabel = "⏎"
         set(v) { field = v; invalidate() }
+    /** swipe typing on the letters layer (setting + field policy) */
+    var swipeEnabled = true
     var haptics = true
     /** 0 light, 1 medium, 2 strong */
     var hapticStrength = 1
@@ -218,6 +225,24 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private var commaDone = false
     private var longPressPointer = -1
 
+    // swipe typing: a drag that starts on a letter and has been over 2+ letter keys (and moved far enough) is a swipe
+    private class SwipeTrack(val pointer: Int, val startX: Float, val startY: Float) {
+        val pts = ArrayList<Touch>(128)
+        var lastKey: KeyDef? = null
+        var keys = 0
+        var started = false
+    }
+    private var track: SwipeTrack? = null
+    /** fading trail: x, y (px) and time per point */
+    private var trailX = FloatArray(256)
+    private var trailY = FloatArray(256)
+    private var trailT = LongArray(256)
+    private var trailN = 0
+    private var trailBreak = -1   // index where a new gesture's trail starts (no segment across it)
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; color = pal.accent
+    }
+
     init { setBackgroundColor(pal.bg) }
 
     // ------------------------------------------------------------------ insets / size
@@ -333,6 +358,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             }
         }
         drawPopups(canvas)
+        if (drawTrail(canvas, now)) animating = true
         if (animating) postInvalidateOnAnimation()
     }
 
@@ -434,6 +460,80 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         return anim
     }
 
+    /** -> still animating. Segments fade out TRAIL_MS after their point was drawn. */
+    private fun drawTrail(canvas: Canvas, now: Long): Boolean {
+        var first = 0
+        while (first < trailN && now - trailT[first] > TRAIL_MS) first++
+        if (first > 0) {
+            System.arraycopy(trailX, first, trailX, 0, trailN - first)
+            System.arraycopy(trailY, first, trailY, 0, trailN - first)
+            System.arraycopy(trailT, first, trailT, 0, trailN - first)
+            trailN -= first
+            trailBreak = if (trailBreak >= first) trailBreak - first else -1
+        }
+        if (trailN == 0) return false
+        val w = 7 * dp
+        for (i in 1 until trailN) {
+            if (i == trailBreak) continue
+            val f = 1f - (now - trailT[i]) / TRAIL_MS.toFloat()
+            if (f <= 0f) continue
+            trailPaint.alpha = (220 * f).toInt()
+            trailPaint.strokeWidth = w * (0.4f + 0.6f * f)
+            canvas.drawLine(trailX[i - 1], trailY[i - 1], trailX[i], trailY[i], trailPaint)
+        }
+        return true
+    }
+
+    private fun trailAdd(x: Float, y: Float, t: Long) {
+        if (trailN == trailX.size) {
+            trailX = trailX.copyOf(trailN * 2); trailY = trailY.copyOf(trailN * 2); trailT = trailT.copyOf(trailN * 2)
+        }
+        trailX[trailN] = x; trailY[trailN] = y; trailT[trailN] = t; trailN++
+    }
+
+    /** px -> model units of the letter area (same mapping as KeyboardLayout.modelTouch), clamped to the letter rows */
+    private fun swipeTouch(x: Float, y: Float): Touch {
+        val ux = (x / keyW).toDouble().coerceIn(0.0, 10.0)
+        val uy = ((y - stripH) / rh - layer.letterRowOffset).toDouble() * KeyGeom.ROW_H
+        return Touch(ux, uy.coerceIn(0.0, 3 * KeyGeom.ROW_H))
+    }
+
+    private fun isLetterKey(k: KeyDef?) = k != null && k.type == KeyType.CHAR && k.text.length == 1 && k.text[0] in 'a'..'z'
+
+    /** Track the swipe pointer's movement (historical samples too); start the swipe once it qualifies. */
+    private fun trackMove(e: MotionEvent, t: SwipeTrack) {
+        val pi = e.findPointerIndex(t.pointer)
+        if (pi < 0) return
+        fun add(x: Float, y: Float, time: Long) {
+            t.pts.add(swipeTouch(x, y))
+            if (t.started) trailAdd(x, y, time)
+            if (!t.started) {
+                val k = layer.keyAt(x / keyW, min((y - stripH) / rh, layer.rows - 0.01f))
+                if (isLetterKey(k) && k != t.lastKey) { t.lastKey = k; t.keys++ }
+                val moved = kotlin.math.hypot((x - t.startX) / keyW, (y - t.startY) / rh)
+                if (t.keys >= 2 && moved >= SWIPE_MIN_KEYS) startSwipe(t)
+            }
+        }
+        for (h in 0 until e.historySize) add(e.getHistoricalX(pi, h), e.getHistoricalY(pi, h), e.getHistoricalEventTime(h))
+        add(e.getX(pi), e.getY(pi), e.eventTime)
+    }
+
+    private fun startSwipe(t: SwipeTrack) {
+        t.started = true
+        // the press is no longer a key press: no preview bubble, no long-press popup
+        pressed.remove(t.pointer)?.let { released[it] = SystemClock.uptimeMillis() }
+        ui.removeCallbacks(longPress); longPressPointer = -1
+        listener.onSwipeStart()
+        // trail from the start of the gesture
+        trailBreak = trailN
+        val now = SystemClock.uptimeMillis()
+        for (p in t.pts) {
+            val yRow = p.y / KeyGeom.ROW_H + layer.letterRowOffset
+            trailAdd((p.x * keyW).toFloat(), (stripH + yRow * rh).toFloat(), now)
+        }
+        invalidate()
+    }
+
     private fun drawPopups(canvas: Canvas) {
         val a = alts
         if (a != null) {
@@ -497,6 +597,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (alts != null) return true   // one alternates popup at a time
                 // the system's swipe-up (gesture navigation) starts here: never a key press
                 if (gestureBottom > 0 && y >= height - gestureBottom) return true
+                if (track?.started == true) return true   // other fingers are ignored during a swipe
+                track = null                              // a second finger: fast typing, not a swipe
                 if (y < stripH) {
                     if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                         stripDown = x; stripLongDone = false
@@ -508,6 +610,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val uy = (y - stripH) / rh
                 val k = layer.keyAt(ux, min(uy, layer.rows - 0.01f)) ?: return true
                 val id = e.getPointerId(i)
+                if (swipeEnabled && layer.isLetters && pressed.isEmpty() && e.actionMasked == MotionEvent.ACTION_DOWN && isLetterKey(k)) {
+                    track = SwipeTrack(id, x, y).also { it.pts.add(swipeTouch(x, y)); it.lastKey = k; it.keys = 1 }
+                }
                 pressed[id] = k
                 buzz()
                 // text keys fire on press (keeps order when presses overlap); ?123 fires on release so a long press
@@ -530,6 +635,11 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                     val pid = e.getPointerId(pi)
                     if (e.getY(pi) < 0 && pressed[pid]?.type == KeyType.SPACE) { pressed.remove(pid); invalidate() }
                 }
+                val tr = track
+                if (tr != null && alts == null) {
+                    trackMove(e, tr)
+                    if (tr.started) { invalidate(); return true }
+                }
                 val a = alts ?: return true
                 val pi = e.findPointerIndex(a.pointer)
                 if (pi < 0) return true
@@ -542,6 +652,22 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
                 val i = e.actionIndex
                 val id = e.getPointerId(i)
+                val tr = track
+                if (tr != null && tr.pointer == id) {
+                    track = null
+                    if (tr.started) {
+                        if (e.actionMasked != MotionEvent.ACTION_CANCEL) {
+                            tr.pts.add(swipeTouch(e.getX(i), e.getY(i)))
+                            listener.onSwipe(tr.pts)
+                        }
+                        if (e.actionMasked != MotionEvent.ACTION_POINTER_UP) {
+                            pressed.clear(); stripDown = -1f; repeatKey = null
+                            ui.removeCallbacks(repeater); ui.removeCallbacks(longPress); ui.removeCallbacks(commaLongPress); alts = null
+                        }
+                        invalidate()
+                        return true
+                    }
+                }
                 val k = pressed.remove(id)
                 if (k != null) released[k] = SystemClock.uptimeMillis()
                 if (id == longPressPointer) { ui.removeCallbacks(longPress); longPressPointer = -1 }
@@ -598,6 +724,10 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         const val REPEAT_START_MS = 400L
         const val LONG_PRESS_MS = 500L
         const val LONG_PRESS_ALT_MS = 380L
+        /** a swipe must also have moved this far from its start (key widths; rows count as key heights) */
+        const val SWIPE_MIN_KEYS = 0.75f
+        /** trail fade-out (ms) */
+        const val TRAIL_MS = 260L
         /** strip toolbar slot width (dp) */
         const val TOOL_W = 44f
     }
