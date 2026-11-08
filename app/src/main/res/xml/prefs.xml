@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="Setup" app:iconSpaceReserved="false">
+        <Preference app:key="enable_keyboard" app:title="1. Enable the keyboard" app:iconSpaceReserved="false" />
+        <Preference app:key="switch_keyboard" app:title="2. Switch to it" app:summary="Pick Autocorrect keyboard in the input method list" app:iconSpaceReserved="false" />
+        <Preference app:key="model_status" app:title="3. Model" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Autocorrect" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat app:key="autocorrect" app:title="Autocorrect" app:defaultValue="true"
+            app:summary="Correct the word on space / punctuation. Backspace right after a correction undoes it." app:iconSpaceReserved="false" />
+        <ListPreference app:key="model" app:title="Model" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="battery_saver" app:title="Battery saver" app:defaultValue="false"
+            app:summary="Use the small 34M model (lm_block4) instead of m2" app:iconSpaceReserved="false" />
+        <ListPreference app:key="style" app:title="Style" app:defaultValue="standard"
+            app:entries="@array/styles" app:entryValues="@array/style_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="haptics" app:title="Vibrate on key press" app:defaultValue="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="debug_overlay" app:title="Debug overlay" app:defaultValue="false"
+            app:summary="Show model, timings (cold load, first inference, per word) and LM skip rate in the suggestion strip" app:iconSpaceReserved="false" />
+        <Preference app:key="stats" app:title="Stats" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Your data" app:iconSpaceReserved="false">
+        <Preference app:key="log_info" app:title="Local log" app:selectable="false" app:iconSpaceReserved="false" />
+        <Preference app:key="export" app:title="Export local data" app:summary="Share the event log as JSONL" app:iconSpaceReserved="false" />
+        <Preference app:key="clear" app:title="Clear local data" app:summary="Delete the event log on this phone" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="share_data" app:title="Share typing data to improve autocorrect" app:defaultValue="false"
+            app:summary="Off. When on, new correction events (never from password, email, URL, number, phone or incognito fields) are uploaded in batches." app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="upload_wifi_only" app:title="Upload on Wi-Fi only" app:defaultValue="true" app:dependency="share_data" app:iconSpaceReserved="false" />
+        <EditTextPreference app:key="upload_url" app:title="Upload server URL" app:dependency="share_data" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="About" app:iconSpaceReserved="false">
+        <Preference app:key="version" app:title="Version" app:selectable="false" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>

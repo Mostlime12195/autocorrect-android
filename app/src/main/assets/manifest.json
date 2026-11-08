@@ -1,0 +1,185 @@
+{
+ "schema": 1,
+ "updated": "2026-11-08T17:28:16Z",
+ "base_url": "https://smitten.mostlime.hackclub.app/autocorrect-android/",
+ "default": "m2_int4",
+ "battery_saver": "block4",
+ "models": [
+  {
+   "id": "m2_int4",
+   "label": "m2 106M int4",
+   "format": "ort",
+   "graph": {
+    "file": "m2.step.int4m.ort",
+    "size": 78969984,
+    "sha256": "cc99e0b9a74e8010ed58a7f134729f9a8844318df4dd2e6267bf1be7decebe5c"
+   },
+   "vocab": {
+    "file": "vocab_m2.json",
+    "size": 695095,
+    "sha256": "f328549e080df02ab6a57e3ecf87dc8dd6470b286516ba00f67a86f383d1c77a"
+   },
+   "meta": {
+    "n_kv_heads": 2,
+    "head_dim": 64,
+    "conv_kernel": 7,
+    "d_model": 640,
+    "state_names": [
+     "k0",
+     "v0",
+     "k1",
+     "v1",
+     "k2",
+     "v2",
+     "k3",
+     "v3",
+     "k4",
+     "v4",
+     "k5",
+     "v5",
+     "c0",
+     "c1",
+     "c2",
+     "c3",
+     "c4",
+     "c5",
+     "c6",
+     "c7",
+     "c8",
+     "c9"
+    ],
+    "vocab_size": 32768,
+    "params": 106315648
+   },
+   "params": {
+    "lam": 1.25,
+    "bias": 0,
+    "margin": 0,
+    "lam_r": 1.25
+   },
+   "params_source": "m2_100m_block4_3b/eval_qat1.json",
+   "supports_style": false,
+   "style_tokens": {
+    "casual": 249,
+    "standard": 250,
+    "formal": 251
+   },
+   "style_params": {}
+  },
+  {
+   "id": "m2_int8",
+   "label": "m2 106M int8",
+   "format": "ort",
+   "graph": {
+    "file": "m2.step.int8.ort",
+    "size": 129693144,
+    "sha256": "03540e547e1ff90778bcb7fc3d206ca79af91cf04c79c62c2a397869fd86670d"
+   },
+   "vocab": {
+    "file": "vocab_m2.json",
+    "size": 695095,
+    "sha256": "f328549e080df02ab6a57e3ecf87dc8dd6470b286516ba00f67a86f383d1c77a"
+   },
+   "meta": {
+    "n_kv_heads": 2,
+    "head_dim": 64,
+    "conv_kernel": 7,
+    "d_model": 640,
+    "state_names": [
+     "k0",
+     "v0",
+     "k1",
+     "v1",
+     "k2",
+     "v2",
+     "k3",
+     "v3",
+     "k4",
+     "v4",
+     "k5",
+     "v5",
+     "c0",
+     "c1",
+     "c2",
+     "c3",
+     "c4",
+     "c5",
+     "c6",
+     "c7",
+     "c8",
+     "c9"
+    ],
+    "vocab_size": 32768,
+    "params": 106315648
+   },
+   "params": {
+    "lam": 1.25,
+    "bias": 0,
+    "margin": 0,
+    "lam_r": 1.25
+   },
+   "params_source": "m2_100m_block4_3b/eval_qat1.json",
+   "supports_style": false,
+   "style_tokens": {
+    "casual": 249,
+    "standard": 250,
+    "formal": 251
+   },
+   "style_params": {}
+  },
+  {
+   "id": "block4",
+   "label": "Block AttnRes 34M (battery saver)",
+   "format": "ort",
+   "graph": {
+    "file": "lm_block4.step.int8.ort",
+    "size": 42312320,
+    "sha256": "5d10b91d18cfa4f5174cbf0fca7987ccb5dc2316334b2cdcae01862adede2533"
+   },
+   "vocab": {
+    "file": "vocab.json",
+    "size": 340209,
+    "sha256": "70ad9ddc0b46857a66de5f14218103e26cf18728bc7bdec2388c56255cbd22b3"
+   },
+   "meta": {
+    "n_kv_heads": 2,
+    "head_dim": 64,
+    "conv_kernel": 7,
+    "d_model": 384,
+    "state_names": [
+     "k0",
+     "v0",
+     "k1",
+     "v1",
+     "k2",
+     "v2",
+     "k3",
+     "v3",
+     "k4",
+     "v4",
+     "c0",
+     "c1",
+     "c2",
+     "c3",
+     "c4",
+     "c5",
+     "c6",
+     "c7",
+     "c8"
+    ],
+    "vocab_size": 16384,
+    "params": 34279552
+   },
+   "params": {
+    "lam": 1.0,
+    "bias": 0,
+    "margin": 0,
+    "lam_r": 1.4
+   },
+   "params_source": "lm_block4_3b/eval_qat0.json",
+   "supports_style": false,
+   "style_tokens": {},
+   "style_params": {}
+  }
+ ]
+}
