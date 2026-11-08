@@ -61,6 +61,13 @@
             app:summary="Show model, timings and top candidates in the suggestion strip" app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="Updates" app:iconSpaceReserved="false">
+        <Preference app:key="update_banner" app:title="Update available" app:isPreferenceVisible="false" app:iconSpaceReserved="false" />
+        <Preference app:key="check_updates" app:title="Check for updates" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="auto_update" app:title="Auto-download updates" app:defaultValue="true"
+            app:summary="Download new versions on Wi-Fi in the background. Android still asks before installing." app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="About" app:iconSpaceReserved="false">
         <Preference app:key="version" app:title="Version" app:selectable="false" app:iconSpaceReserved="false" />
         <Preference app:key="licenses" app:title="Open-source licenses" app:selectable="false" app:iconSpaceReserved="false"

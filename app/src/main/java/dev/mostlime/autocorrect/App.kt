@@ -8,6 +8,7 @@ import java.io.File
 import dev.mostlime.autocorrect.engine.UserData
 import dev.mostlime.autocorrect.log.EventLog
 import dev.mostlime.autocorrect.log.UploadWorker
+import dev.mostlime.autocorrect.update.Updater
 import dev.mostlime.autocorrect.model.ModelStore
 
 class App : Application() {
@@ -30,7 +31,7 @@ class App : Application() {
         if (prefs.sp.contains(Prefs.REWIND)) prefs.sp.edit().remove(Prefs.REWIND).apply()
         // the keyboard runs in ":ime"; background work is scheduled from the app process only
         val imeProcess = Build.VERSION.SDK_INT >= 28 && getProcessName().endsWith(":ime")
-        if (!imeProcess) UploadWorker.schedule(this, prefs)
+        if (!imeProcess) { UploadWorker.schedule(this, prefs); Updater.schedule(this) }
     }
 
     companion object {

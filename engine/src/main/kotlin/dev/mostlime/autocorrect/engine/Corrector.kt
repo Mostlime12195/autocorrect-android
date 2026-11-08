@@ -369,7 +369,14 @@ class Corrector(
 }
 
 /** A word some way back, re-checked with the text typed after it as right context. start = offset in the snapshot. */
-class RewindTarget(val start: Int, val word: String, val left: String, val sep: String, val right: String, val wordsBack: Int)
+/**
+ * kind WORD: confusable swap of `word`. COMMA: insert "," after it. STOP: end the sentence after it ("." and, with
+ * autoCap, a capital on the next word; `word` then spans "word<sep>next" so the change replaces both).
+ */
+class RewindTarget(val start: Int, val word: String, val left: String, val sep: String, val right: String, val wordsBack: Int,
+                   val kind: Int = WORD, val autoCap: Boolean = true) {
+    companion object { const val WORD = 0; const val COMMA = 1; const val STOP = 2 }
+}
 
 class RewindChange(val start: Int, val from: String, val to: String, val margin: Double, val wordsBack: Int)
 
@@ -393,9 +400,18 @@ object Rewind {
 
     fun isTarget(word: String) = word.lowercase() in SETS
 
-    fun check(targets: List<RewindTarget>, scorer: LmScorer, lam: Double, margin: Double = MARGIN, user: UserData? = null): List<RewindChange> {
+    /** extra margin per word beyond MAX_WORDS_BACK (far rewinds need clearer evidence) */
+    const val PER_WORD = 0.5
+    const val MAX_SENTENCE_WORDS = 20
+
+    fun marginFor(base: Double, wordsBack: Int) = base + PER_WORD * maxOf(0, wordsBack - MAX_WORDS_BACK)
+
+    fun check(targets: List<RewindTarget>, scorer: LmScorer, lam: Double, margin: Double = MARGIN, user: UserData? = null,
+              pen: Map<String, Double> = emptyMap(), cancelled: () -> Boolean = { false }): List<RewindChange> {
         val out = ArrayList<RewindChange>()
         for (t in targets) {
+            if (cancelled()) break
+            if (t.kind != RewindTarget.WORD) { punct(t, scorer, lam, margin, user, pen)?.let { out.add(it) }; continue }
             if (user != null && user.has(t.word)) continue
             val group = SETS[t.word.lowercase()] ?: continue
             val cands = group.map { applyCase(it, t.word) }
@@ -404,8 +420,26 @@ object Rewind {
             var best = cur
             for (i in lp.indices) if (lp[i] > lp[best]) best = i
             val m = lam * (lp[best] - lp[cur])
-            if (best != cur && m >= margin + (user?.penalty(t.word, cands[best]) ?: 0.0)) out.add(RewindChange(t.start, t.word, cands[best], m, t.wordsBack))
+            if (best != cur && m >= marginFor(margin, t.wordsBack) + (user?.penalty(t.word, cands[best]) ?: 0.0)) out.add(RewindChange(t.start, t.word, cands[best], m, t.wordsBack))
         }
         return out
+    }
+
+    /** comma / sentence end after t.word, scored on the whole remainder (t.right) with and without it */
+    private fun punct(t: RewindTarget, scorer: LmScorer, lam: Double, margin: Double, user: UserData?, pen: Map<String, Double>): RewindChange? {
+        val to = if (t.kind == RewindTarget.COMMA) t.word + "," else {
+            // "word<sep>next" -> "word.<sep>Next"
+            // (just "word" before a newline: "word.")
+            val m = Regex("^(\\S+)(\\s+)(\\S.*)$").find(t.word)
+            if (m == null) t.word + "." else {
+                val next = m.groupValues[3]
+                m.groupValues[1] + "." + m.groupValues[2] + (if (t.autoCap) next.take(1).uppercase() + next.drop(1) else next)
+            }
+        }
+        val lp = scorer.score(listOf(LmReq(t.left, t.sep + t.word + t.right), LmReq(t.left, t.sep + to + t.right)))
+        val kindPen = pen[if (t.kind == RewindTarget.COMMA) "comma" else "punct"] ?: 0.0
+        val m = lam * (lp[1] - lp[0]) - kindPen
+        val need = marginFor(margin, t.wordsBack) + (user?.penalty(t.word, to) ?: 0.0)
+        return if (m >= need) RewindChange(t.start, t.word, to, m, t.wordsBack) else null
     }
 }

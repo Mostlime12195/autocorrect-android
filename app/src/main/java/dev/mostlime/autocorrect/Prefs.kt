@@ -47,6 +47,15 @@ class Prefs(private val ctx: Context) {
     /** manifest mirrors, tried in order (a custom URL in settings replaces them) */
     val manifestUrls: List<String> get() = (sp.getString(MANIFEST_URL, null) ?: "").ifBlank { null }?.let { listOf(it) } ?: DEFAULT_MANIFEST_URLS
 
+    /** in-app updates: last latest.json seen, auto-download (default on), last version notified */
+    var latestJson: String?
+        get() = sp.getString(LATEST_JSON, null)
+        set(v) = sp.edit().putString(LATEST_JSON, v).apply()
+    val autoUpdate get() = sp.getBoolean(AUTO_UPDATE, true)
+    var updateNotified: Int
+        get() = sp.getInt(UPDATE_NOTIFIED, 0)
+        set(v) = sp.edit().putInt(UPDATE_NOTIFIED, v).apply()
+
     var uploadOffset: Long
         get() = sp.getLong(UPLOAD_OFFSET, 0)
         set(v) = sp.edit().putLong(UPLOAD_OFFSET, v).apply()
@@ -87,6 +96,9 @@ class Prefs(private val ctx: Context) {
         const val UPLOAD_OFFSET = "upload_offset"
         const val INSTALL_ID = "install_id"
         const val PENDING_DELETES = "pending_deletes"
+        const val LATEST_JSON = "update_latest_json"
+        const val AUTO_UPDATE = "auto_update"
+        const val UPDATE_NOTIFIED = "update_notified"
 
         /** Collection endpoint (autocorrect repo collect/API.md); only used when sharing is switched on. */
         const val DEFAULT_UPLOAD_URL = "https://autocorrect.mostlime.hackclub.app/api/v1/upload"

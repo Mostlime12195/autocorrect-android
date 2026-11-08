@@ -29,9 +29,13 @@ for i in 1 2 3 4 5; do
   echo "upload attempt $i failed, retrying"; sleep 5
 done
 [ "$ok" = 1 ] || { echo "upload failed"; exit 1; }
+# idempotent (a dropped connection may still have done it): install if the upload is there, then check the result
 for i in 1 2 3 4 5; do
-  if ssh -o ConnectTimeout=20 "$HOST" "sudo install -m644 /tmp/ac.apk $DIR/autocorrect-$V.apk && sudo ln -sfn autocorrect-$V.apk $DIR/autocorrect-latest.apk && sudo tee $DIR/latest.json >/dev/null && rm -f /tmp/ac.apk" < "$TMP/latest.json"; then ok=2; break; fi
-  echo "install attempt $i failed, retrying"; sleep 5
+  ssh -o ConnectTimeout=20 "$HOST" "set -e; if [ -f /tmp/ac.apk ]; then sudo install -m644 /tmp/ac.apk $DIR/autocorrect-$V.apk; fi
+    [ \"\$(sha256sum $DIR/autocorrect-$V.apk | cut -d' ' -f1)\" = $SHA ]
+    sudo ln -sfn autocorrect-$V.apk $DIR/autocorrect-latest.apk; sudo tee $DIR/latest.json >/dev/null; rm -f /tmp/ac.apk" < "$TMP/latest.json" || true
+  if curl -fsS "$BASE/latest.json?$(date +%s)" | grep -q "$SHA"; then ok=2; break; fi
+  echo "install attempt $i not confirmed, retrying"; sleep 5
 done
 [ "$ok" = 2 ] || { echo "install failed"; exit 1; }
 

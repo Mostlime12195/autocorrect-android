@@ -52,19 +52,31 @@ class LearningTest {
         val queue = ArrayList<Pair<CorrectionRequest, (WordResult?) -> Unit>>()
         val crafted = HashMap<String, WordResult>()
         var rewinds = 0
+        var wordLm: LmScorer = lm
+        var rewindLm: LmScorer = lm
+        val pendingRewinds = ArrayList<Pair<List<dev.mostlime.autocorrect.engine.RewindTarget>, (List<dev.mostlime.autocorrect.engine.RewindChange>) -> Unit>>()
+        override fun checkSentences(reqs: List<dev.mostlime.autocorrect.engine.SentenceReq>, done: (List<List<dev.mostlime.autocorrect.engine.SentenceFix>>?) -> Unit) =
+            done(reqs.map { dev.mostlime.autocorrect.engine.SentenceCheck.check(corrector, it, rewindLm, P, KeyboardController.FLAG_MARGIN) })
+        fun deliverRewinds() {
+            while (pendingRewinds.isNotEmpty()) {
+                val (t, d) = pendingRewinds.removeAt(0)
+                d(dev.mostlime.autocorrect.engine.Rewind.check(t, rewindLm, 1.25, user = user))
+            }
+        }
         override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) { queue.add(req to done) }
         override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
         override fun cancelQueued() {}
-        override fun rewind(targets: List<dev.mostlime.autocorrect.engine.RewindTarget>, done: (List<dev.mostlime.autocorrect.engine.RewindChange>) -> Unit) { rewinds++ }
+        override fun rewind(targets: List<dev.mostlime.autocorrect.engine.RewindTarget>, done: (List<dev.mostlime.autocorrect.engine.RewindChange>) -> Unit) { rewinds++; pendingRewinds.add(targets to done) }
         fun deliver() {
             while (queue.isNotEmpty()) {
                 val (req, done) = queue.removeAt(0)
-                done(crafted[req.input.typed] ?: corrector.correctWord(req.input, lm, P, req.prev, merge = req.merge))
+                done(crafted[req.input.typed] ?: corrector.correctWord(req.input, wordLm, P, req.prev, merge = req.merge))
             }
         }
     }
 
     private val ed = KeyboardControllerTest.FakeEditor()
+    private val timer = KeyboardControllerTest.ManualTimer()
     private val engine = Engine()
     private val events = ArrayList<Map<String, Any?>>()
     private val added = ArrayList<String>()
@@ -82,7 +94,7 @@ class LearningTest {
         override fun setShift(shift: Shift) {}
         override fun onResult(r: WordResult?) {}
         override fun onDictAdded(word: String) { added.add(word) }
-    }, KeyboardControllerTest.ManualTimer(), learning) { events.add(it) }
+    }, timer, learning) { events.add(it) }
 
     private fun start(suggestOnly: Boolean = false, confidentOnly: Boolean = false) =
         ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "test" }, "t",
@@ -268,6 +280,35 @@ class LearningTest {
         ctl.startInput(ControllerConfig(sentences, true, "formal", { "t" }, "t", autoCap = false))
         type("hello ")
         assertFalse(engine.queue.last().first.autoCap)
+    }
+
+    /** the evidence for "too" -> "to" only arrives 7 words later ("home") */
+    private val farLm = LmScorer { reqs -> DoubleArray(reqs.size) { i ->
+        val t = reqs[i].left + reqs[i].cont
+        if ("home" !in t) -5.0 else if ("want to go to the shop and then home" in t) -1.0 else -10.0
+    } }
+
+    @Test fun idleRewindFixesAWordMoreThanThreeBack() {
+        start()
+        engine.wordLm = farLm; engine.rewindLm = farLm
+        type("i want too go to the shop and then home ")
+        engine.deliver(); engine.deliverRewinds()
+        assertTrue(ed.text.toString(), ed.text.contains("want too go"))     // the 3-word window can't see "home"
+        timer.fireAll()                                                     // typing paused: whole-sentence pass
+        engine.deliverRewinds()
+        assertTrue(ed.text.toString(), ed.text.endsWith(" want to go to the shop and then home "))
+    }
+
+    @Test fun idleSuggestMarksAWordMoreThanThreeBack() {
+        start(suggestOnly = true)
+        engine.wordLm = farLm; engine.rewindLm = farLm
+        type("i want too go to the shop and then home ")
+        engine.deliver()
+        assertTrue(ed.marks.isEmpty())
+        timer.fireAll()
+        assertEquals("i want too go to the shop and then home ", ed.text.toString())
+        assertEquals("to", ed.marks["i want ".length]?.first())
+        assertEquals(1, ed.marks.size)
     }
 
     @Test fun spellingClassification() {

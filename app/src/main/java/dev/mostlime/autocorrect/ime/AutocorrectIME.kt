@@ -16,6 +16,10 @@ import dev.mostlime.autocorrect.engine.DecodeParams
 import dev.mostlime.autocorrect.engine.Rewind
 import dev.mostlime.autocorrect.engine.RewindChange
 import dev.mostlime.autocorrect.engine.RewindTarget
+import dev.mostlime.autocorrect.engine.SentenceCheck
+import dev.mostlime.autocorrect.engine.SentenceFix
+import dev.mostlime.autocorrect.engine.SentenceReq
+import kotlinx.coroutines.isActive
 import dev.mostlime.autocorrect.engine.SwipeResult
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordResult
@@ -41,6 +45,27 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     private val editor = object : Editor {
         private val ic get() = currentInputConnection
         override fun textBefore(n: Int) = ic?.getTextBeforeCursor(n, 0)?.toString() ?: ""
+        override fun textAfter(n: Int) = ic?.getTextAfterCursor(n, 0)?.toString() ?: ""
+        /** same text, fresh SuggestionSpans: replace [cursor + offset, + len) and put the cursor back */
+        override fun remark(offset: Int, text: String, marks: List<TypoMark>) {
+            val c = ic ?: return
+            val et = c.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return
+            if (et.selectionStart != et.selectionEnd || et.selectionStart < 0) return
+            val cur = et.startOffset + et.selectionStart
+            val a = cur + offset
+            if (a < 0) return
+            val ss = android.text.SpannableString(text)
+            for (m in marks) {
+                if (m.start < 0 || m.start + m.len > text.length) continue
+                ss.setSpan(android.text.style.SuggestionSpan(this@AutocorrectIME, m.suggestions.take(5).toTypedArray(),
+                    android.text.style.SuggestionSpan.FLAG_MISSPELLED or android.text.style.SuggestionSpan.FLAG_EASY_CORRECT),
+                    m.start, m.start + m.len, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            c.beginBatchEdit()
+            try {
+                if (c.setComposingRegion(a, a + text.length)) { c.commitText(ss, 1); c.setSelection(cur, cur) }
+            } finally { c.endBatchEdit() }
+        }
         override fun hasSelection() = !ic?.getSelectedText(0).isNullOrEmpty()
         override fun setComposing(text: String) { ic?.setComposingText(text, 1) }
         override fun finishComposing() { ic?.finishComposingText() }
@@ -143,6 +168,41 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                 if (r != null) Log.i(TAG, "swipe -> decode ${"%.0f".format(r.decodeMs)}ms (${r.nSurvivors} templates) " +
                     (if (r.lm != null) "LM ${"%.0f".format(r.lmMs)}ms ${r.cands.size} cands" else "no LM") + " pts ${req.path.size}")
                 main.post { done(r) }
+            }
+        }
+
+        private var idleJob: Job? = null
+
+        override fun cancelIdle() { idleJob?.cancel(); idleJob = null }
+
+        /** ATOMIC: a cancelled job still runs (and stops at once), so done() is always called */
+        override fun checkSentences(reqs: List<SentenceReq>, done: (List<List<SentenceFix>>?) -> Unit) {
+            idleJob = EngineHolder.scope.launch(start = kotlinx.coroutines.CoroutineStart.ATOMIC) {
+                val sc = EngineHolder.scorer?.takeIf { !it.step.closed }
+                val corr = EngineHolder.corrector
+                val out = if (sc == null || corr == null) null else runCatching {
+                    val t0 = App.now()
+                    val r = reqs.map { req -> if (!isActive) return@runCatching null
+                        SentenceCheck.check(corr, req, sc, EngineHolder.params ?: DEFAULT_PARAMS, KeyboardController.FLAG_MARGIN) { !isActive } }
+                    Log.i(TAG, "sentence check: ${reqs.size} sentences in ${App.now() - t0} ms")
+                    r
+                }.getOrNull()
+                val ok = isActive
+                main.post { done(if (ok) out else null) }
+            }
+        }
+
+        override fun rewindIdle(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) {
+            idleJob = EngineHolder.scope.launch(start = kotlinx.coroutines.CoroutineStart.ATOMIC) {
+                val sc = EngineHolder.scorer?.takeIf { !it.step.closed }
+                val p = EngineHolder.params ?: DEFAULT_PARAMS
+                val t0 = App.now()
+                val ch = if (sc == null || !isActive) emptyList() else runCatching {
+                    Rewind.check(targets, sc, p.lamRe, Rewind.MARGIN, app.user, p.pen) { !isActive }
+                }.getOrDefault(emptyList())
+                if (sc != null) Log.i(TAG, "idle rewind: ${targets.size} targets in ${App.now() - t0} ms, ${ch.size} changes")
+                val ok = isActive
+                main.post { done(if (ok) ch else emptyList()) }
             }
         }
 

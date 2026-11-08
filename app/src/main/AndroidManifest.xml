@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- in-app updates: install the downloaded APK (Android asks the user), and tell them one is available -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".App"
@@ -31,6 +34,10 @@
             android:exported="false"
             android:label="Personal dictionary"
             android:windowSoftInputMode="adjustResize" />
+
+        <receiver
+            android:name=".update.InstallReceiver"
+            android:exported="false" />
 
         <service
             android:name=".ime.AutocorrectIME"

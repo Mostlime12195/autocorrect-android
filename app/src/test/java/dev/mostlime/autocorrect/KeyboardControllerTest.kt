@@ -68,6 +68,12 @@ class KeyboardControllerTest {
         }
         /** typo marks (SuggestionSpans in the app): start in the text -> suggestions */
         val marks = HashMap<Int, List<String>>()
+        override fun remark(offset: Int, text: String, marks: List<TypoMark>) {
+            val start = this.text.length + offset
+            if (start < 0 || this.text.substring(start, minOf(this.text.length, start + text.length)) != text) return
+            this.marks.keys.removeAll { it >= start && it < start + text.length }
+            for (m in marks) this.marks[start + m.start] = m.suggestions
+        }
         override fun replaceBefore(n: Int, text: String, mark: TypoMark?) {
             val start = this.text.length - n
             replaceBefore(n, text)

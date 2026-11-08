@@ -60,6 +60,35 @@ class BenchTest {
         println("runs/LM word %.2f, run ms %.2f (ort %.2f, java %.2f), padded cells/run %.1f, used tokens/run %.1f".format(
             runs.toDouble() / lmWords, (c.totalNs - c0.totalNs) / 1e6 / runs, (c.ortNs - c0.ortNs) / 1e6 / runs,
             ((c.totalNs - c0.totalNs) - (c.ortNs - c0.ortNs)) / 1e6 / runs, (c.cells - c0.cells).toDouble() / runs, (c.usedTokens - c0.usedTokens).toDouble() / runs))
+        // idle passes (run after a typing pause, never in the typing path): whole-sentence suggest check and far rewind
+        if (System.getenv("AC_IDLE") == "1") {
+            var sMs = 0.0; var sWords = 0; var sents = 0; var rMs = 0.0; var rTargets = 0
+            for (m in msgs) {
+                val text = m.words.indices.joinToString("") { m.seps[it] + m.words[it].typed }
+                for (r in SentenceCheck.split(text)) {
+                    val sc = NeuralScorer(tok, step)
+                    val req = SentenceReq(text.substring(0, r.first).takeLast(200), text.substring(r))
+                    val t1 = System.nanoTime()
+                    SentenceCheck.check(corr, req, sc, p, 1.5)
+                    sMs += (System.nanoTime() - t1) / 1e6; sWords += SEG.findAll(req.sentence).count(); sents++
+                    // far rewind over the same sentence: confusables + commas (formal)
+                    val ws = SEG.findAll(req.sentence).toList().takeLast(Rewind.MAX_SENTENCE_WORDS)
+                    val targets = ArrayList<RewindTarget>()
+                    for (j in 0 until ws.size - 1) {
+                        val w = ws[j]
+                        val left = req.left + req.sentence.substring(0, w.range.first).trimEnd()
+                        val rest = req.sentence.substring(w.range.last + 1)
+                        if (Rewind.isTarget(w.value)) targets.add(RewindTarget(w.range.first, w.value, left, " ", rest, ws.size - 1 - j))
+                        targets.add(RewindTarget(w.range.first, w.value, left, " ", rest, ws.size - 1 - j, RewindTarget.COMMA))
+                    }
+                    val t2 = System.nanoTime()
+                    Rewind.check(targets, sc, 1.25, pen = mapOf("comma" to 0.0, "punct" to 3.0))
+                    rMs += (System.nanoTime() - t2) / 1e6; rTargets += targets.size
+                }
+            }
+            println("idle suggest check: %d sentences, %.0f ms/sentence, %.1f ms/word".format(sents, sMs / sents, sMs / sWords))
+            println("idle far rewind (formal, confusables + commas): %.0f ms/sentence, %.1f ms/target".format(rMs / sents, rMs / maxOf(1, rTargets)))
+        }
         step.close()
     }
 }

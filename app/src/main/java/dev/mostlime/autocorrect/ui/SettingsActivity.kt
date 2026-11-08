@@ -24,6 +24,7 @@ import dev.mostlime.autocorrect.R
 import dev.mostlime.autocorrect.log.LogStats
 import dev.mostlime.autocorrect.log.UploadWorker
 import dev.mostlime.autocorrect.model.DownloadWorker
+import dev.mostlime.autocorrect.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -102,6 +103,14 @@ class SettingsActivity : AppCompatActivity() {
                 summaryProvider = Preference.SummaryProvider<androidx.preference.EditTextPreference> { app.prefs.uploadUrl }
             }
             findPreference<Preference>("version")!!.summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+            findPreference<Preference>("check_updates")!!.setOnPreferenceClickListener { checkUpdates(manual = true); true }
+            findPreference<Preference>("update_banner")!!.setOnPreferenceClickListener { Updater.pending()?.let { installUpdate(it) }; true }
+            showUpdate()
+            checkUpdates(manual = false)
+            // notifications for updates found in the background (Android 13+ asks once)
+            if (android.os.Build.VERSION.SDK_INT >= 33 && savedInstanceState == null &&
+                requireContext().checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
 
             WorkManager.getInstance(requireContext()).getWorkInfosForUniqueWorkLiveData(DownloadWorker.NAME).observe(this) { infos ->
                 showDownload(infos.firstOrNull())
@@ -129,6 +138,61 @@ class SettingsActivity : AppCompatActivity() {
         private var download: WorkInfo? = null
 
         private fun showDownload(w: WorkInfo?) { download = w; refresh() }
+
+        private val notifPermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
+
+        private fun showUpdate(status: String? = null) {
+            val u = Updater.pending()
+            findPreference<Preference>("update_banner")?.apply {
+                isVisible = u != null
+                if (u != null) {
+                    title = "Update to ${u.version}"
+                    summary = status ?: ((if (Updater.isDownloaded(requireContext(), u)) "Downloaded. Tap to install." else "Tap to download and install.") +
+                        if (u.notes.isNotBlank()) "\n${u.notes}" else "")
+                }
+            }
+        }
+
+        private fun checkUpdates(manual: Boolean) {
+            lifecycleScope.launch {
+                if (manual) findPreference<Preference>("check_updates")?.summary = "Checking…"
+                val u = withContext(Dispatchers.IO) { Updater.check(requireContext().applicationContext) }
+                findPreference<Preference>("check_updates")?.summary = when {
+                    u == null -> if (manual) "Couldn't reach the update server" else null
+                    u.newer -> "${u.version} is available"
+                    else -> "Up to date (${BuildConfig.VERSION_NAME})"
+                }
+                showUpdate()
+                if (u != null && u.newer && app.prefs.autoUpdate && !Updater.isDownloaded(requireContext(), u)) {
+                    val cm = requireContext().getSystemService(android.net.ConnectivityManager::class.java)
+                    if (!cm.isActiveNetworkMetered) withContext(Dispatchers.IO) { Updater.download(requireContext().applicationContext, u) }
+                    showUpdate()
+                }
+            }
+        }
+
+        private fun installUpdate(u: dev.mostlime.autocorrect.update.UpdateInfo) {
+            val ctx = requireContext()
+            if (!Updater.canInstall(ctx)) {
+                MaterialAlertDialogBuilder(ctx).setTitle("Allow updates from this app")
+                    .setMessage("Android needs your OK once: turn on \"Allow from this source\" for Autocorrect, then come back and tap the update again.")
+                    .setPositiveButton("Open settings") { _, _ -> startActivity(Updater.allowInstallsIntent(ctx)) }
+                    .setNegativeButton("Cancel", null).show()
+                return
+            }
+            lifecycleScope.launch {
+                showUpdate("Downloading…")
+                val f = withContext(Dispatchers.IO) {
+                    Updater.download(ctx.applicationContext, u) { done, total ->
+                        if (total > 0) view?.post { showUpdate("Downloading ${100 * done / total}%") }
+                    }
+                }
+                if (f == null) { showUpdate("Download failed (or the file didn't match). Tap to try again."); return@launch }
+                showUpdate("Installing…")
+                withContext(Dispatchers.IO) { runCatching { Updater.install(ctx.applicationContext, f) } }
+                    .onFailure { showUpdate("Install failed: ${it.message}") }
+            }
+        }
 
         private fun mb(b: Long) = "${(b + 500_000) / 1_000_000} MB"
 

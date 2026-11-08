@@ -6,6 +6,9 @@ import dev.mostlime.autocorrect.engine.Rewind
 import dev.mostlime.autocorrect.engine.RewindChange
 import dev.mostlime.autocorrect.engine.RewindTarget
 import dev.mostlime.autocorrect.engine.SEG
+import dev.mostlime.autocorrect.engine.SentenceCheck
+import dev.mostlime.autocorrect.engine.SentenceFix
+import dev.mostlime.autocorrect.engine.SentenceReq
 import dev.mostlime.autocorrect.engine.Slot
 import dev.mostlime.autocorrect.engine.SwipeResult
 import dev.mostlime.autocorrect.engine.Touch
@@ -25,6 +28,10 @@ interface Editor {
     fun replaceBefore(n: Int, text: String) { deleteBefore(n); commit(text) }
     /** same, with a likely-typo mark (SuggestionSpan in the app: red underline + the app's tap-to-fix menu) on a word of text */
     fun replaceBefore(n: Int, text: String, mark: TypoMark?) = replaceBefore(n, text)
+    /** text after the cursor (suggest-only idle pass) */
+    fun textAfter(n: Int): String = ""
+    /** re-commit `text` (unchanged) starting `offset` chars from the cursor (negative = before it) with exactly these typo marks */
+    fun remark(offset: Int, text: String, marks: List<TypoMark>) {}
     fun beginBatch()
     fun endBatch()
     /** backspace with no composing word: -> chars removed before the cursor, or -1 if unknown (selection, key event) */
@@ -40,6 +47,12 @@ interface CorrectionEngine {
     fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit)
     /** drop queued (not yet started) work */
     fun cancelQueued()
+    /** suggest-only idle pass: typo fixes per sentence (null = no model / cancelled) */
+    fun checkSentences(reqs: List<SentenceReq>, done: (List<List<SentenceFix>>?) -> Unit) = done(null)
+    /** drop the idle work (a key was pressed); its callback then gets null / empty */
+    fun cancelIdle() {}
+    /** the idle (whole-sentence) rewind: cancelled by cancelIdle */
+    fun rewindIdle(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) = rewind(targets, done)
     /** confusion-set rewind (needs the model; done(empty) without one) */
     fun rewind(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) = done(emptyList())
     /** swipe: geometry decode + LM rerank of the gesture (done(null) when unavailable) */
@@ -174,6 +187,8 @@ class KeyboardController(
         override fun deleteBefore(n: Int) { e.deleteBefore(n); pos -= n }
         override fun replaceBefore(n: Int, text: String) { e.replaceBefore(n, text); pos += text.length - n; compLen = 0 }
         override fun replaceBefore(n: Int, text: String, mark: TypoMark?) { e.replaceBefore(n, text, mark); pos += text.length - n; compLen = 0 }
+        override fun textAfter(n: Int) = e.textAfter(n)
+        override fun remark(offset: Int, text: String, marks: List<TypoMark>) = e.remark(offset, text, marks)
         override fun beginBatch() = e.beginBatch()
         override fun endBatch() = e.endBatch()
         override fun deleteKey(): Int { val n = e.deleteKey(); if (n < 0) invalidatePendings() else pos -= n; return n }
@@ -230,7 +245,8 @@ class KeyboardController(
         flushLast()
         config = cfg
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
-        typo = null; dictAdded = null
+        typo = null; dictAdded = null; punctTried.clear(); sentenceCache.clear()
+        idleToken?.let { timer.cancel(it) }; idleToken = null
         lastPress = null; swipeShift = null; swipePending = 0; swipeSpace = false
         releaseHold()
         shift = Shift.OFF
@@ -260,6 +276,7 @@ class KeyboardController(
 
     // ------------------------------------------------------------------ keys
     fun key(k: KeyDef, touch: Touch) {
+        idleTouch()
         if (holding) { held.add { key(k, touch) }; return }
         val ed = ed() ?: return
         lastPress = null
@@ -457,6 +474,120 @@ class KeyboardController(
             if (holding && holdDone()) releaseHold()
         }
         if (r != null && !r.cheap) scheduleRewind()   // the model is loaded (skipped words count too)
+        idleTouch()
+    }
+
+    // ------------------------------------------------------------------ idle passes (no word window)
+    private var idleToken: Any? = null
+    /** suggest-only: fixes per sentence already marked, by left context + sentence */
+    private val sentenceCache = object : LinkedHashMap<String, List<SentenceFix>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<SentenceFix>>?) = size > 64
+    }
+    /** auto mode: punctuation already proposed after a word (by its start in the counter) */
+    private val punctTried = HashSet<Long>()
+
+    /** typing (or a result) happened: restart the idle timer, drop idle work in flight */
+    private fun idleTouch() {
+        idleToken?.let { timer.cancel(it) }
+        engine.cancelIdle()
+        idleToken = timer.post(IDLE_MS) { idleToken = null; onIdle() }
+    }
+
+    private fun onIdle() {
+        if (holding || pendings.isNotEmpty() || composing.isNotEmpty() || rewindBusy) return
+        if (!config.policy.autocorrect || !config.autocorrect) return
+        if (config.suggestOnly) idleSuggest() else idleRewind()
+    }
+
+    /**
+     * Suggest-only: re-check every sentence of the readable text (before and after the cursor), all words, with the rest
+     * of the sentence as right context; marks are added or removed per changed sentence. Text is never changed.
+     */
+    private fun idleSuggest() {
+        if (config.policy.sensitive && config.policy.password) return
+        val ed = ed() ?: return
+        if (ed.hasSelection()) return
+        val before = ed.textBefore(IDLE_CHARS)
+        val after = ed.textAfter(IDLE_CHARS)
+        val text = before + after
+        val todo = ArrayList<Triple<IntRange, String, String>>()   // range, cache key, left
+        for (r in SentenceCheck.split(text)) {
+            val left = text.substring(0, r.first).takeLast(IDLE_LEFT)
+            val key = left + "\u0001" + text.substring(r)
+            if (!sentenceCache.containsKey(key)) todo.add(Triple(r, key, left))
+        }
+        if (todo.isEmpty()) return
+        // nearest to the cursor first
+        todo.sortBy { (r, _, _) -> if (r.last < before.length) before.length - r.last else r.first - before.length }
+        val batch = todo.take(IDLE_SENTENCES)
+        val snapPos = pos
+        engine.checkSentences(batch.map { (r, _, left) -> SentenceReq(left, text.substring(r)) }) { res ->
+            if (res == null || pos != snapPos || composing.isNotEmpty() || holding) return@checkSentences
+            val e2 = ed() ?: return@checkSentences
+            if (e2.textBefore(IDLE_CHARS) != before || e2.textAfter(IDLE_CHARS) != after || e2.hasSelection()) return@checkSentences
+            for ((j, fixes) in res.withIndex()) {
+                val (r, key, _) = batch[j]
+                sentenceCache[key] = fixes
+                e2.remark(r.first - before.length, text.substring(r), fixes.map { TypoMark(it.start, it.from.length, it.fixes) })
+                // the strip's flagged word: drop it if this pass found it fine
+                val t = typo
+                if (t != null) {
+                    val tStart = before.length - (pos - t.start).toInt()
+                    if (tStart in r && fixes.none { it.start == tStart - r.first }) {
+                        typo = null
+                        if (stripMode == StripMode.TYPO) setStrip(emptyList(), -1, StripMode.NONE)
+                    }
+                }
+            }
+            if (todo.size > batch.size) idleTouch()   // more sentences: next round
+        }
+    }
+
+    /**
+     * Auto mode, idle: confusable swaps across the whole current sentence (up to 20 words back; the margin grows with
+     * distance) and, in the formal style, commas and sentence ends scored on everything typed after them.
+     */
+    private fun idleRewind() {
+        if (rewindBusy) return
+        val ed = ed() ?: return
+        if (ed.hasSelection()) return
+        val snap = ed.textBefore(CTX_CHARS)
+        val end = pos
+        // the current sentence: back to the last . ! ? or newline (formal: the whole tail, so a missing full stop can land)
+        val formal = config.style == "formal"
+        val cut = if (formal) maxOf(snap.lastIndexOf('\n'), 0) else (snap.indexOfLast { it == '.' || it == '!' || it == '?' || it == '\n' } + 1)
+        val words = SEG.findAll(snap).filter { it.range.first >= cut }.toList().takeLast(Rewind.MAX_SENTENCE_WORDS)
+        if (words.size < 2) return
+        val n = words.size
+        val targets = ArrayList<RewindTarget>()
+        for (j in 0 until n - 1) {
+            val w = words[j]
+            val abs = end - (snap.length - w.range.first)
+            val back = n - 1 - j
+            val (left, sep) = splitLeft(snap.substring(0, w.range.first))
+            if (Rewind.isTarget(w.value) && abs !in rewound && !learning.isUserWord(w.value))
+                targets.add(RewindTarget(w.range.first, w.value, left, sep, snap.substring(w.range.last + 1).trimEnd(), back))
+            if (!formal || abs in punctTried) continue
+            val gap = snap.substring(w.range.last + 1, words[j + 1].range.first)
+            if (gap != " ") continue                         // already punctuated (or a newline)
+            punctTried.add(abs)
+            val rest = snap.substring(words[j + 1].range.last + 1).trimEnd()
+            targets.add(RewindTarget(w.range.first, w.value, left, sep, gap + words[j + 1].value + rest, back, RewindTarget.COMMA))
+            // a sentence end only with at least 3 words of right context
+            if (n - 1 - (j + 1) >= 2)
+                targets.add(RewindTarget(w.range.first, w.value + gap + words[j + 1].value, left, sep, rest, back, RewindTarget.STOP, config.autoCap))
+        }
+        if (targets.isEmpty()) return
+        rewindBusy = true
+        engine.rewindIdle(targets) { changes ->
+            rewindBusy = false
+            // one change per region: overlapping ones (a full stop over a swapped word) keep the best margin
+            val keep = ArrayList<RewindChange>()
+            for (c in changes.sortedByDescending { it.margin }) {
+                if (keep.none { k -> c.start < k.start + k.from.length && k.start < c.start + c.from.length }) keep.add(c)
+            }
+            applyRewind(snap, end, keep)
+        }
     }
 
     // ------------------------------------------------------------------ confusion-set rewind
@@ -902,6 +1033,7 @@ class KeyboardController(
      * it. Keys typed while it decodes are held and replayed after it, like the fast hold at word end.
      */
     fun swipe(path: List<Touch>) {
+        idleTouch()
         if (holding) { held.add { swipe(path) }; return }
         val ed = ed() ?: return
         lastPress = null; swipeSpace = false
@@ -1045,6 +1177,11 @@ class KeyboardController(
         val WORD_RE = Regex("[A-Za-z]+(?:'[A-Za-z]+)*'?")
         const val WORD_END_PUNCT = ".,!?;:)\""
         val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")
+        /** idle passes start after this pause in typing */
+        const val IDLE_MS = 400L
+        const val IDLE_CHARS = 2000
+        const val IDLE_LEFT = 200
+        const val IDLE_SENTENCES = 6
         /** a flagged typo: the fix must beat the typed word by this much (score units, nats) */
         const val FLAG_MARGIN = 1.5
         /** "only auto-correct when confident": the choice must beat every other candidate by this much (WordResult.margin) */
