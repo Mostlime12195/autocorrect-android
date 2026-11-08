@@ -20,7 +20,9 @@ class OrtParityTest {
     private val meta = StepMeta(nKvHeads = 2, headDim = 64, convKernel = 7, dModel = 384,
         stateNames = (0 until 5).flatMap { listOf("k$it", "v$it") } + (0 until 9).map { "c$it" })
 
-    private fun open(name: String): StepModel {
+    /** the ORT-format graph if present, else the web demo's .onnx of the same model */
+    private fun open(name0: String): StepModel {
+        val name = if (File(dir, name0).exists()) name0 else name0.replace(".ort", ".onnx")
         val f = File(dir, name)
         assumeTrue("no $f (set AC_MODEL_DIR)", dir.isNotEmpty() && f.exists())
         val buf = RandomAccessFile(f, "r").use { it.channel.map(FileChannel.MapMode.READ_ONLY, 0, it.length()) }
