@@ -1,27 +1,29 @@
 {
  "schema": 1,
- "updated": "2026-11-08T19:11:42Z",
- "base_url": "https://smitten.mostlime.hackclub.app/autocorrect/",
- "default": "m2_int8",
+ "updated": "2026-11-08T19:24:26Z",
+ "base_url": "https://smitten.mostlime.hackclub.app/autocorrect-android/",
+ "base_urls": [
+  "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-v1/",
+  "https://smitten.mostlime.hackclub.app/autocorrect-android/"
+ ],
+ "default": "m2_int4",
  "battery_saver": "block4",
  "models": [
   {
    "id": "m2_int4",
    "label": "m2 106M int4",
-   "format": "onnx",
+   "format": "ort",
    "graph": {
-    "file": "m2.step.int4.onnx",
-    "size": 75761133,
-    "sha256": "b632e74032280ad68bf88a82408e42124ec025e9d3240aa23f73ca25beee55f6"
+    "file": "m2.step.int4m.ort",
+    "size": 78969984,
+    "sha256": "cc99e0b9a74e8010ed58a7f134729f9a8844318df4dd2e6267bf1be7decebe5c"
    },
    "vocab": {
     "file": "vocab_m2.json",
     "size": 695095,
     "sha256": "f328549e080df02ab6a57e3ecf87dc8dd6470b286516ba00f67a86f383d1c77a"
    },
-   "session_config": {
-    "session.qdq_matmulnbits_accuracy_level": "4"
-   },
+   "session_config": {},
    "meta": {
     "n_kv_heads": 2,
     "head_dim": 64,
@@ -91,20 +93,18 @@
   {
    "id": "m2_int8",
    "label": "m2 106M int8",
-   "format": "onnx",
+   "format": "ort",
    "graph": {
-    "file": "m2.step.int8.onnx",
-    "size": 129102260,
-    "sha256": "7ff0b764b592f9066b7d73b626db5c3ac00c3092ed76097f863cfbb57a0ca615"
+    "file": "m2.step.int8.ort",
+    "size": 129693144,
+    "sha256": "03540e547e1ff90778bcb7fc3d206ca79af91cf04c79c62c2a397869fd86670d"
    },
    "vocab": {
     "file": "vocab_m2.json",
     "size": 695095,
     "sha256": "f328549e080df02ab6a57e3ecf87dc8dd6470b286516ba00f67a86f383d1c77a"
    },
-   "session_config": {
-    "session.qdq_matmulnbits_accuracy_level": "4"
-   },
+   "session_config": {},
    "meta": {
     "n_kv_heads": 2,
     "head_dim": 64,
@@ -174,20 +174,18 @@
   {
    "id": "block4",
    "label": "Block AttnRes 34M (battery saver)",
-   "format": "onnx",
+   "format": "ort",
    "graph": {
-    "file": "lm_block4.step.int8.onnx",
-    "size": 41803508,
-    "sha256": "9ca6664ac3997cd045fe7cc48ce03adbc6f452c6be1c57ff3368b351bdadba91"
+    "file": "lm_block4.step.int8.ort",
+    "size": 42312320,
+    "sha256": "5d10b91d18cfa4f5174cbf0fca7987ccb5dc2316334b2cdcae01862adede2533"
    },
    "vocab": {
     "file": "vocab.json",
     "size": 340209,
     "sha256": "70ad9ddc0b46857a66de5f14218103e26cf18728bc7bdec2388c56255cbd22b3"
    },
-   "session_config": {
-    "session.qdq_matmulnbits_accuracy_level": "4"
-   },
+   "session_config": {},
    "meta": {
     "n_kv_heads": 2,
     "head_dim": 64,

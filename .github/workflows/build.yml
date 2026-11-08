@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MODEL_HOST: https://smitten.mostlime.hackclub.app/autocorrect-android
+  MODEL_HOST: https://github.com/Mostlime12195/autocorrect-models/releases/download/models-v1
 
 jobs:
   build:

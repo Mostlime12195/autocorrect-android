@@ -37,24 +37,29 @@ class KeyboardControllerTest {
     class FakeEditor : Editor {
         val text = StringBuilder()
         var cs = -1
+        /** what the user could see: the text after every edit outside a batch, and at the end of each batch */
+        val visible = ArrayList<String>()
+        private var depth = 0
+        private fun shown() { if (depth == 0 && visible.lastOrNull() != text.toString()) visible.add(text.toString()) }
         val composingText get() = if (cs >= 0) text.substring(cs) else ""
         override fun textBefore(n: Int) = text.takeLast(n).toString()
         override fun hasSelection() = false
         override fun setComposing(text: String) {
             if (cs >= 0) this.text.setLength(cs) else cs = this.text.length
-            this.text.append(text)
+            this.text.append(text); shown()
         }
         override fun finishComposing() { cs = -1 }
         override fun commit(text: String) {
             if (cs >= 0) { this.text.setLength(cs); cs = -1 }
-            this.text.append(text)
+            this.text.append(text); shown()
         }
         override fun deleteBefore(n: Int) {
             this.text.setLength(maxOf(0, this.text.length - n))
             if (cs > this.text.length) cs = -1
+            shown()
         }
-        override fun beginBatch() {}
-        override fun endBatch() {}
+        override fun beginBatch() { depth++ }
+        override fun endBatch() { depth--; shown() }
         override fun deleteKey(): Int { if (text.isEmpty()) return 0; text.setLength(text.length - 1); if (cs > text.length) cs = -1; return 1 }
         override fun enter() { cs = -1; text.append('\n') }
         override fun capsMode() = false
@@ -88,9 +93,14 @@ class KeyboardControllerTest {
         }
     }
 
-    class ManualTimer : Timer {
+    /** Short delays (the fast hold) expire at once, i.e. the engine is slower than the hold, unless fastExpires = false. */
+    class ManualTimer(var fastExpires: Boolean = true) : Timer {
         val tasks = LinkedHashMap<Any, () -> Unit>()
-        override fun post(delayMs: Long, r: () -> Unit): Any { val t = Any(); tasks[t] = r; return t }
+        override fun post(delayMs: Long, r: () -> Unit): Any {
+            val t = Any()
+            if (fastExpires && delayMs < 100) { r(); return t }
+            tasks[t] = r; return t
+        }
         override fun cancel(token: Any) { tasks.remove(token) }
         fun fireAll() { val t = tasks.values.toList(); tasks.clear(); t.forEach { it() } }
     }
@@ -213,6 +223,26 @@ class KeyboardControllerTest {
         assertEquals(" ", req.input.sep)
         engine.deliver(engine.queue.size)
         assertTrue(ed.text.toString(), ed.text.endsWith("have one "))
+    }
+
+    /** An engine that answers within the fast hold: the text goes straight from the typed word to the corrected one. */
+    @Test fun quickCorrectionsAreOneVisibleEdit() {
+        val ed2 = FakeEditor()
+        val quick = object : CorrectionEngine {
+            override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) = done(corrector.correctWord(req.input, lm, P, req.prev, merge = req.merge))
+            override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
+            override fun cancelQueued() {}
+        }
+        val t2 = ManualTimer(fastExpires = false)
+        val c2 = KeyboardController({ ed2 }, quick, object : ControllerUi {
+            override fun showStrip(words: List<String>, bold: Int) {}
+            override fun setShift(shift: Shift) {}
+            override fun onResult(r: WordResult?) {}
+        }, t2) {}.apply { startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "t" }, "t")) }
+        for (ch in "teh quick ") c2.key(keyFor(ch), KeyGeom.center(ch) ?: Touch.APOS)
+        assertEquals("the quick ", ed2.text.toString())
+        assertTrue(ed2.visible.toString(), "teh " !in ed2.visible)          // never shown uncorrected with its space
+        assertTrue(ed2.visible.toString(), ed2.visible.contains("the "))
     }
 
     @Test fun passwordFieldsNeverCorrectOrLog() {

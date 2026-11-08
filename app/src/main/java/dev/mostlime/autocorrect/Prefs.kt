@@ -56,7 +56,10 @@ class Prefs(private val ctx: Context) {
 
         /** Placeholder: the collection endpoint doesn't exist yet (docs/upload-schema.md). Uploads to it are skipped. */
         const val DEFAULT_UPLOAD_URL = "https://example.invalid/autocorrect/v1/events"
-        val DEFAULT_MANIFEST_URLS = listOf("https://smitten.mostlime.hackclub.app/autocorrect-android/manifest.json")
+        val DEFAULT_MANIFEST_URLS = listOf(
+            "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-v1/manifest.json",
+            "https://smitten.mostlime.hackclub.app/autocorrect-android/manifest.json",
+        )
         val STYLES = listOf("casual", "standard", "formal")
     }
 }

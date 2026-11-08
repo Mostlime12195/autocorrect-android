@@ -103,7 +103,7 @@ class KeyboardController(
     private class Pending(
         val id: Int, val typed: String, val touches: List<Touch>, val sepText: String, val before: String, val sep: String,
         val prevOut: String?, val prevSep: String, var anchor: Long,
-    ) { var done = false; var valid = true }
+    ) { var done = false; var valid = true; var uncommitted = false }
     private val pendings = ArrayList<Pending>()
     private var nextId = 1
 
@@ -133,6 +133,8 @@ class KeyboardController(
     private fun ed(): Editor? = editor()?.let { Tracked(it) }
 
     private var holding = false
+    /** what the current hold waits for (fast hold: this word's result; enter: every pending correction) */
+    private var holdDone: () -> Boolean = { true }
     private val held = ArrayList<() -> Unit>()
     private var holdToken: Any? = null
 
@@ -160,6 +162,7 @@ class KeyboardController(
 
     fun finishInput() {
         flushLast()
+        pendings.filter { it.uncommitted }.forEach { commitHeld(it) }
         releaseHold()
         pendings.clear()
         resetWord(); compLen = 0
@@ -208,6 +211,7 @@ class KeyboardController(
                 if (pendings.any { it.valid }) {
                     // hold enter (and later keys) until the corrections land or the hold times out
                     holding = true
+                    holdDone = { pendings.none { it.valid } }
                     holdToken = timer.post(ENTER_HOLD_MS) { releaseHold() }
                     held.add { flushLast(); ed()?.enter(); autoShift() }
                 } else { flushLast(); ed.enter(); autoShift() }
@@ -278,11 +282,15 @@ class KeyboardController(
         // the text before the word, from the live editor (the composing word is the last thing before the cursor)
         val raw = if (canCorrect) ed.textBefore(CTX_CHARS + typed.length) else ""
         val before = if (raw.endsWith(typed)) raw.dropLast(typed.length) else raw
-        // commit the word as typed right away; the correction (if any) replaces it when it's ready
-        ed.commit(typed + sepText)
+        if (!canCorrect || !raw.endsWith(typed)) {
+            ed.commit(typed + sepText)
+            resetWord()
+            prev = null; autoShift(); setStrip(emptyList(), -1, StripMode.NONE); return
+        }
+        // the word stays as typed (composing) for up to FAST_HOLD_MS: a quick result (cheap path, skip, contractions,
+        // a fast model) is then committed directly, in one edit, so the text never shows typed -> corrected.
+        // A slower result is applied later over the committed word.
         resetWord()
-        prev = prev.takeIf { canCorrect }
-        if (!canCorrect || !raw.endsWith(typed)) { prev = null; autoShift(); setStrip(emptyList(), -1, StripMode.NONE); return }
 
         val (left, sep) = splitLeft(before)
         val p = prev
@@ -294,16 +302,30 @@ class KeyboardController(
             PrevWord(p.slot, p.idx, leftp, sepp, p.lmScored, p.margin)
         } else null
         val id = nextId++
-        val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, pos)
+        val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, -1).apply { uncommitted = true }
         pendings.add(pd)
         // keep at most MAX_PENDING corrections in flight (slow model + fast typing): the oldest gives way
         while (pendings.size > MAX_PENDING) { val old = pendings.removeAt(0); old.done = true; stats.dropped++ }
         val req = CorrectionRequest(id, WordInput(typed, tch, left, sep), prevWord, if (prevWord != null && p != null) MergeInput(p.typed, p.touches) else null,
             formal = cfg.style == "formal")
-        engine.correct(req) { r -> onCorrection(pd, r) }
         prev = null   // set again when this word's result is applied
-        autoShift()
         setStrip(emptyList(), -1, StripMode.NONE)
+        engine.correct(req) { r -> onCorrection(pd, r) }
+        if (pd.uncommitted) {
+            holding = true
+            holdDone = { !pd.uncommitted }
+            holdToken = timer.post(FAST_HOLD_MS) { commitHeld(pd); releaseHold() }
+        }
+    }
+
+    /** Commit a held word as typed (its correction, if any, lands later). */
+    private fun commitHeld(pd: Pending) {
+        if (!pd.uncommitted) return
+        pd.uncommitted = false
+        val ed = ed() ?: return
+        ed.commit(pd.typed + pd.sepText)
+        pd.anchor = pos
+        autoShift()
     }
 
     private fun onCorrection(pd: Pending, r: WordResult?) {
@@ -311,9 +333,15 @@ class KeyboardController(
         pd.done = true
         pendings.remove(pd)
         try {
-            if (pd.valid) apply(pd, r) else { stats.dropped++; ui.onResult(r) }
+            if (pd.uncommitted) {
+                // still held: commit and correct in one batch -> a single visible change
+                val ed = ed()
+                ed?.beginBatch()
+                try { commitHeld(pd); if (pd.valid) apply(pd, r) else ui.onResult(r) } finally { ed?.endBatch() }
+                autoShift()
+            } else if (pd.valid) apply(pd, r) else { stats.dropped++; ui.onResult(r) }
         } finally {
-            if (holding && pendings.none { it.valid }) releaseHold()
+            if (holding && holdDone()) releaseHold()
         }
     }
 
@@ -495,6 +523,7 @@ class KeyboardController(
         const val LOG_CONTEXT_CHARS = 120
         const val LOG_CANDS = 8
         const val ENTER_HOLD_MS = 400L
+        const val FAST_HOLD_MS = 60L
         const val MAX_PENDING = 3
         const val MAX_AFTER = 120L
         const val SUGGEST_DEBOUNCE_MS = 60L
