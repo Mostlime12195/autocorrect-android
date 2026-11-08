@@ -35,6 +35,19 @@ object KeyGeom {
         }
     }
 
+    /** the QWERTY centres the model was trained with */
+    private val QX = CX.copyOf()
+    private val QY = CY.copyOf()
+
+    /**
+     * Another keyboard layout: letter centres in model units (missing letters keep their QWERTY place). The spatial model,
+     * candidate generation and swipe templates read CX / CY, so they follow (swipe templates must be rebuilt).
+     */
+    @Synchronized fun setCenters(c: Map<Char, Pair<Double, Double>>) {
+        for (i in 0 until 26) { CX[i] = QX[i]; CY[i] = QY[i] }
+        for ((ch, xy) in c) { val i = ch - 'a'; if (i in 0 until 26) { CX[i] = xy.first; CY[i] = xy.second } }
+    }
+
     fun center(c: Char): Touch? {
         val lc = c.lowercaseChar()
         if (lc !in 'a'..'z') return null

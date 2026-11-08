@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+        <ListPreference app:key="model" app:title="Model" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="battery_saver" app:title="Lite model (34M)" app:iconSpaceReserved="false" />
+        <Preference app:key="stats" app:title="Stats" app:selectable="false" app:iconSpaceReserved="false" />
+        <Preference app:key="stats_reset" app:title="Reset stats" app:summary="Count from now on (the log itself is kept)" app:iconSpaceReserved="false" />
+        <Preference app:key="refresh_models" app:title="Refresh model list" app:summary="Fetch the latest model manifest" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="debug_overlay" app:title="Debug overlay" app:defaultValue="false"
+            app:summary="Show model, timings and top candidates in the suggestion strip" app:iconSpaceReserved="false" />
+
+</PreferenceScreen>

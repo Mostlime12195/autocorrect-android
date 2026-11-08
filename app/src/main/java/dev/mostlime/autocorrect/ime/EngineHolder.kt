@@ -40,6 +40,26 @@ object EngineHolder {
 
     /** Space bar extent of the Android layout in key units (KeyboardLayout: x 2.5 .. 7.5). */
     val SPACE_BAR_X = doubleArrayOf(2.5, 7.5)
+    @Volatile private var spaceBar = SPACE_BAR_X
+    private var layoutKey = "qwerty|2.5"
+
+    /**
+     * Keyboard layout change (main thread, at input start): letter centres for the spatial model, the space bar for the
+     * space-miss candidates, and the swipe templates (rebuilt lazily from the new centres).
+     */
+    fun applyLayout(l: Layer) {
+        val centers = KeyboardLayout.centers(l)
+        val bar = KeyboardLayout.spaceBar(l)
+        val key = centers.entries.sortedBy { it.key }.joinToString { "${it.key}${it.value}" } + "|" + bar.joinToString()
+        if (key == layoutKey) return
+        layoutKey = key
+        scope.launch {
+            dev.mostlime.autocorrect.engine.KeyGeom.setCenters(centers)
+            spaceBar = bar
+            corrector?.gen2?.spaceBarX = bar
+            swipe = null
+        }
+    }
 
     /** ORT intra-op threads: short bursts at word end, so use up to 4 cores */
     val THREADS = minOf(4, Runtime.getRuntime().availableProcessors()).coerceAtLeast(1)
@@ -94,7 +114,7 @@ object EngineHolder {
             val miss = runCatching {
                 app.assets.open("misspellings.tsv").bufferedReader().readLines().mapNotNull { l -> l.split('\t').takeIf { it.size >= 2 }?.let { it[0] to it[1] } }.toMap()
             }.getOrDefault(emptyMap())
-            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = SPACE_BAR_X), misspellings = miss, user = app.user)
+            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = spaceBar), misspellings = miss, user = app.user)
             lexiconMs = App.now() - t0
             Log.i(TAG, "lexicon ${lex.size} words in $lexiconMs ms")
         }

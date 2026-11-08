@@ -38,14 +38,16 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /** latest.json on the Nest mirror (the GitHub repo is private, so its API doesn't work for users). */
-class UpdateInfo(val version: String, val code: Int, val url: String, val sha256: String, val notes: String) {
+class UpdateInfo(val version: String, val code: Int, val url: String, val sha256: String, val notes: String,
+                 /** bytes (for progress: the server may not send Content-Length); 0 = unknown */ val size: Long = 0) {
     val newer get() = code > BuildConfig.VERSION_CODE
 
     companion object {
         fun parse(text: String): UpdateInfo {
             val o = Json.parseToJsonElement(text).jsonObject
             return UpdateInfo(o["version"]!!.jsonPrimitive.content, o["code"]!!.jsonPrimitive.int, o["url"]!!.jsonPrimitive.content,
-                o["sha256"]!!.jsonPrimitive.content.lowercase(), o["notes"]?.jsonPrimitive?.content.orEmpty())
+                o["sha256"]!!.jsonPrimitive.content.lowercase(), o["notes"]?.jsonPrimitive?.content.orEmpty(),
+                o["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L)
         }
     }
 }
@@ -86,32 +88,47 @@ object Updater {
         return f.exists() && sha256(f) == u.sha256
     }
 
-    /** Blocking download to the cache, verified. -> the file, or null (bad hash / network). Old APKs are removed. */
+    /**
+     * Blocking download to the cache, verified by SHA-256 (never by Content-Length, which proxies may drop). Resumes a
+     * broken download with a Range request, up to 4 tries. -> the file, or null. Old APKs are removed.
+     */
     fun download(ctx: Context, u: UpdateInfo, progress: (Long, Long) -> Unit = { _, _ -> }): File? {
         val f = apkFile(ctx, u)
         if (isDownloaded(ctx, u)) return f
-        dir(ctx).listFiles()?.forEach { if (it != f) it.delete() }
+        dir(ctx).listFiles()?.forEach { if (it != f && it.name != f.name + ".part") it.delete() }
         val tmp = File(f.path + ".part")
-        return try {
-            val c = (URI(u.url).toURL().openConnection() as HttpURLConnection).apply { connectTimeout = 15_000; readTimeout = 30_000 }
+        repeat(4) { attempt ->
             try {
-                val total = c.contentLengthLong
-                c.inputStream.use { inp ->
-                    tmp.outputStream().use { out ->
-                        val buf = ByteArray(64 * 1024)
-                        var done = 0L
-                        while (true) {
-                            val n = inp.read(buf); if (n < 0) break
-                            out.write(buf, 0, n); done += n; progress(done, total)
+                val have = if (tmp.exists()) tmp.length() else 0L
+                val c = (URI(u.url).toURL().openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15_000; readTimeout = 30_000; instanceFollowRedirects = true
+                    if (have > 0) setRequestProperty("Range", "bytes=$have-")
+                }
+                try {
+                    val append = have > 0 && c.responseCode == 206
+                    if (c.responseCode !in 200..299) throw java.io.IOException("HTTP ${c.responseCode}")
+                    val total = if (u.size > 0) u.size else c.contentLengthLong.let { if (it > 0) it + (if (append) have else 0) else -1 }
+                    var done = if (append) have else 0L
+                    c.inputStream.use { inp ->
+                        java.io.FileOutputStream(tmp, append).use { out ->
+                            val buf = ByteArray(64 * 1024)
+                            while (true) {
+                                val n = inp.read(buf); if (n < 0) break
+                                out.write(buf, 0, n); done += n; progress(done, total)
+                            }
                         }
                     }
-                }
-            } finally { c.disconnect() }
-            if (sha256(tmp) != u.sha256) { Log.w(TAG, "sha256 mismatch"); tmp.delete(); return null }
-            tmp.renameTo(f); f
-        } catch (e: Exception) {
-            Log.w(TAG, "download failed: $e"); tmp.delete(); null
+                } finally { c.disconnect() }
+                if (u.size > 0 && tmp.length() < u.size) throw java.io.IOException("short read ${tmp.length()}/${u.size}")
+                if (sha256(tmp) != u.sha256) { Log.w(TAG, "sha256 mismatch"); tmp.delete(); return null }
+                tmp.renameTo(f)
+                return f
+            } catch (e: Exception) {
+                Log.w(TAG, "download attempt ${attempt + 1} failed: $e")
+                if (u.size > 0 && tmp.length() > u.size) tmp.delete()
+            }
         }
+        return null
     }
 
     fun sha256(f: File): String {

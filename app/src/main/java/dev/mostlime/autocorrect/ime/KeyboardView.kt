@@ -20,6 +20,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import androidx.core.content.ContextCompat
+import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.R
 import dev.mostlime.autocorrect.engine.KeyGeom
 import dev.mostlime.autocorrect.engine.Touch
@@ -28,12 +29,23 @@ import kotlin.math.min
 enum class Shift { OFF, ON, LOCK }
 
 /** Colors: Material You (system dynamic colors) on Android 12+, a neutral light/dark palette before that. */
+/**
+ * Keyboard colors. Mode: system / light / dark (setting). Accent (setting "Theme color"): Material You (wallpaper colors,
+ * Android 12+, the default there), the original green (the default elsewhere), a swatch or a custom color; text on
+ * the accent is black or white, whichever reads better.
+ */
 class Palette(ctx: Context) {
-    val dark = (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    private val prefs = runCatching { App.instance.prefs }.getOrNull()
+    val dark = when (prefs?.themeMode) {
+        "light" -> false
+        "dark" -> true
+        else -> (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    }
     private val dyn = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     private val res = ctx
     private fun pick(darkId: Int, lightId: Int, darkFallback: Int, lightFallback: Int): Int =
         if (dyn) res.getColor(if (dark) darkId else lightId) else if (dark) darkFallback else lightFallback
+    private fun fixed(darkC: Int, lightC: Int) = if (dark) darkC else lightC
 
     val bg = pick(android.R.color.system_neutral1_900, android.R.color.system_neutral1_100, 0xFF1B1B1F.toInt(), 0xFFE8EAED.toInt())
     val key = pick(android.R.color.system_neutral1_800, android.R.color.system_neutral1_10, 0xFF3C3C43.toInt(), 0xFFFFFFFF.toInt())
@@ -41,10 +53,32 @@ class Palette(ctx: Context) {
     val pressed = pick(android.R.color.system_neutral2_600, android.R.color.system_neutral2_300, 0xFF5A5A63.toInt(), 0xFFB0B5BC.toInt())
     val fg = pick(android.R.color.system_neutral1_50, android.R.color.system_neutral1_900, 0xFFF1F1F1.toInt(), 0xFF202124.toInt())
     val dim = pick(android.R.color.system_neutral2_200, android.R.color.system_neutral2_600, 0xFF9AA0A6.toInt(), 0xFF5F6368.toInt())
-    val accent = pick(android.R.color.system_accent1_200, android.R.color.system_accent1_600, 0xFF81C995.toInt(), 0xFF2E7D32.toInt())
-    val onAccent = pick(android.R.color.system_accent1_800, android.R.color.system_accent1_0, 0xFF0B3D1B.toInt(), 0xFFFFFFFF.toInt())
-    val accentSoft = pick(android.R.color.system_accent2_800, android.R.color.system_accent2_100, 0xFF33433A.toInt(), 0xFFDCEBDD.toInt())
     val popup = pick(android.R.color.system_neutral1_700, android.R.color.system_neutral1_0, 0xFF4A4A52.toInt(), 0xFFFFFFFF.toInt())
+
+    /** the chosen accent color, or null for Material You / green */
+    private val custom: Int? = prefs?.accentColor()
+    private val useDyn = custom == null && dyn && (prefs?.themeColor ?: "dynamic") == "dynamic"
+    val accent = custom ?: if (useDyn) res.getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
+        else fixed(0xFF81C995.toInt(), 0xFF2E7D32.toInt())
+    val onAccent = if (custom != null) onColor(custom) else if (useDyn) res.getColor(if (dark) android.R.color.system_accent1_800 else android.R.color.system_accent1_0)
+        else fixed(0xFF0B3D1B.toInt(), 0xFFFFFFFF.toInt())
+    val accentSoft = if (custom != null) blend(custom, bg, if (dark) 0.35f else 0.25f)
+        else if (useDyn) res.getColor(if (dark) android.R.color.system_accent2_800 else android.R.color.system_accent2_100)
+        else fixed(0xFF33433A.toInt(), 0xFFDCEBDD.toInt())
+
+    companion object {
+        /** black or white text on c, by relative luminance */
+        fun onColor(c: Int): Int {
+            fun ch(v: Int): Double { val x = v / 255.0; return if (x <= 0.03928) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4) }
+            val l = 0.2126 * ch((c shr 16) and 0xff) + 0.7152 * ch((c shr 8) and 0xff) + 0.0722 * ch(c and 0xff)
+            return if (l > 0.4) 0xFF1B1B1F.toInt() else 0xFFFFFFFF.toInt()
+        }
+        /** a * f + b * (1 - f), opaque */
+        fun blend(a: Int, b: Int, f: Float): Int {
+            fun mix(sh: Int) = ((((a shr sh) and 0xff) * f + ((b shr sh) and 0xff) * (1 - f)).toInt() and 0xff) shl sh
+            return (0xFF shl 24) or mix(16) or mix(8) or mix(0)
+        }
+    }
 }
 
 /**
@@ -68,6 +102,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         fun onPasteChip() {}
         /** long-press on comma: emoji (the comma the press typed is taken back) */
         fun onCommaLongPress() {}
+        /** one-handed mode: the empty side was tapped */
+        fun onOneHandedSwap() {}
         /** the touch that started on a letter became a swipe (the letter its press typed must be taken back) */
         fun onSwipeStart() {}
         /** the swipe ended: path in model units (key widths, rows x ROW_H), letter area only */
@@ -165,6 +201,17 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private val dp = resources.displayMetrics.density
     private val stripH = 46 * dp
     private var keyW = 0f
+    /** left edge of the key area (one-handed right) */
+    private var areaX0 = 0f
+    /** "off", "left", "right" */
+    var oneHanded = "off"
+        set(v) { if (v != field) { field = v; requestLayout(); invalidate() } }
+    /** split letters (landscape) */
+    var split = false
+        set(v) { if (v != field) { field = v; requestLayout(); invalidate() } }
+    /** key units (0..10) -> px, and back */
+    private fun pxOf(u: Float): Float = if (split) (if (u < 5f) u * keyW else width - (10f - u) * keyW) else areaX0 + u * keyW
+    private fun uOf(px: Float): Float = if (split) (if (px < width / 2f) px / keyW else 10f - (width - px) / keyW) else (px - areaX0) / keyW
     private var rowH = 0f
     private var bottomInset = 0
 
@@ -185,6 +232,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private val icGo = icon(R.drawable.ms_go)
     private val icDone = icon(R.drawable.ms_done)
     private val icNext = icon(R.drawable.ms_next)
+    private val icBack = icon(R.drawable.ms_back)
     private val icSettings = icon(R.drawable.ms_settings)
     private val icUndo = icon(R.drawable.ms_undo)
     private val icPaste = icon(R.drawable.ms_paste)
@@ -231,6 +279,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         var lastKey: KeyDef? = null
         var keys = 0
         var started = false
+        /** slid off its first key: it may become a swipe, so no preview bubble for it */
+        var moving = false
     }
     private var track: SwipeTrack? = null
     /** fading trail: x, y (px) and time per point */
@@ -244,6 +294,77 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     }
 
     init { setBackgroundColor(pal.bg) }
+
+    // ------------------------------------------------------------------ look (settings -> Appearance)
+    var keyGapDp = 4f
+        set(v) { field = v; invalidate() }
+    var keyRadiusDp = 9f
+        set(v) { field = v; invalidate() }
+    /** hint label size (1 = normal, 0 = hidden) */
+    var hintScale = 1f
+        set(v) { field = v; invalidate() }
+    var longPressMs = LONG_PRESS_ALT_MS
+    /** key fill opacity over a background image, % */
+    var keyAlpha = 75
+
+    /** background image: the picked file, darkened by dimPct, blurred by blurDp (Android 12+); one bitmap at view size */
+    private var bgFile: java.io.File? = null
+    private var bgDim = 0
+    private var bgBlur = 0
+    private var bgBitmap: android.graphics.Bitmap? = null
+    private var bgNode: Any? = null
+
+    fun setBackgroundImage(file: java.io.File?, dimPct: Int, blurDp: Int) {
+        if (file == bgFile && dimPct == bgDim && blurDp == bgBlur && (file == null || bgBitmap != null)) return
+        bgFile = file?.takeIf { it.exists() }; bgDim = dimPct; bgBlur = blurDp
+        bgBitmap?.recycle(); bgBitmap = null; bgNode = null
+        if (width > 0 && height > 0) loadBackground(width, height)
+        invalidate()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (bgFile != null && (w != oldw || h != oldh)) { bgBitmap?.recycle(); bgBitmap = null; bgNode = null; loadBackground(w, h) }
+    }
+
+    /** decode with subsampling, centre-crop to w x h (re-done when the height setting changes the view size) */
+    private fun loadBackground(w: Int, h: Int) {
+        val f = bgFile ?: return
+        try {
+            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(f.path, o)
+            if (o.outWidth <= 0 || o.outHeight <= 0) return
+            var sample = 1
+            while (o.outWidth / (sample * 2) >= w && o.outHeight / (sample * 2) >= h) sample *= 2
+            val src = android.graphics.BitmapFactory.decodeFile(f.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: return
+            val scale = maxOf(w / src.width.toFloat(), h / src.height.toFloat())
+            val sw = w / scale; val sh = h / scale
+            val sx = (src.width - sw) / 2; val sy = (src.height - sh) / 2
+            val out = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            android.graphics.Canvas(out).drawBitmap(src, android.graphics.Rect(sx.toInt(), sy.toInt(), (sx + sw).toInt(), (sy + sh).toInt()),
+                android.graphics.Rect(0, 0, w, h), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+            src.recycle()
+            bgBitmap = out
+            if (bgBlur > 0 && Build.VERSION.SDK_INT >= 31) {
+                bgNode = android.graphics.RenderNode("kb-bg").apply {
+                    setPosition(0, 0, w, h)
+                    beginRecording().also { it.drawBitmap(out, 0f, 0f, null) }
+                    endRecording()
+                    setRenderEffect(android.graphics.RenderEffect.createBlurEffect(bgBlur * dp, bgBlur * dp, android.graphics.Shader.TileMode.CLAMP))
+                }
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("AcView", "background image: $e")
+        }
+    }
+
+    private fun drawBackground(canvas: Canvas) {
+        val b = bgBitmap ?: return
+        val node = bgNode
+        if (node != null && Build.VERSION.SDK_INT >= 31 && canvas.isHardwareAccelerated) canvas.drawRenderNode(node as android.graphics.RenderNode)
+        else canvas.drawBitmap(b, 0f, 0f, null)
+        if (bgDim > 0) canvas.drawColor((bgDim * 255 / 100) shl 24)
+    }
 
     // ------------------------------------------------------------------ insets / size
     /** Bottom system area the keys must stay clear of: 3-button bar, gesture handle, display cutout. */
@@ -284,21 +405,33 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         bottomInset = maxOf(bottomInset, bottomOf(rootWindowInsets))
         gestureBottom = maxOf(gestureBottom, gestureBottomOf(rootWindowInsets))
         val w = View.MeasureSpec.getSize(widthMeasureSpec)
-        keyW = w / 10f
-        rowH = (keyW * 1.25f).coerceIn(46 * dp, 58 * dp)
+        // one-handed: keys in 80% of the width on one side; split (landscape): two halves of 40% with a gap
+        keyW = if (oneHanded != "off" || split) w * 0.8f / 10f else w / 10f
+        areaX0 = if (oneHanded == "right" && !split) w * 0.2f else 0f
+        rowH = (w / 10f * 1.25f).coerceIn(46 * dp, 58 * dp)
         rowH *= heightScale
         setMeasuredDimension(w, (stripH + baseRows * rowH + 8 * dp).toInt() + bottomInset)
     }
 
     private fun keyRect(k: KeyDef, out: RectF) {
-        val padX = 4 * dp
-        val padY = 5 * dp
-        out.set(k.x * keyW + padX, stripH + k.row * rh + padY, (k.x + k.w) * keyW - padX, stripH + (k.row + 1) * rh - padY)
+        val padX = keyGapDp * dp
+        val padY = (keyGapDp + 1) * dp
+        out.set(pxOf(k.x) + padX, stripH + k.row * rh + padY, pxOf(k.x + k.w) - padX, stripH + (k.row + 1) * rh - padY)
     }
 
     // ------------------------------------------------------------------ drawing
     override fun onDraw(canvas: Canvas) {
         val now = SystemClock.uptimeMillis()
+        drawBackground(canvas)
+        if (oneHanded != "off" && !split) {
+            // the empty side: a chevron that moves the keys there
+            val sz = (28 * dp).toInt()
+            val cx = if (areaX0 > 0) areaX0 / 2 else (areaX0 + 10 * keyW + width) / 2
+            val cy = stripH + (height - stripH - bottomInset) / 2f
+            val ic = if (areaX0 > 0) icBack else icNext
+            ic.setBounds((cx - sz / 2).toInt(), (cy - sz / 2).toInt(), (cx + sz / 2).toInt(), (cy + sz / 2).toInt())
+            ic.setTint(pal.dim); ic.alpha = 255; ic.draw(canvas)
+        }
         var animating = drawStrip(canvas, now)
         val held = pressed.values.toSet()
         for (k in layer.keys) {
@@ -323,7 +456,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 k.type == KeyType.CHAR || k.type == KeyType.SPACE -> pal.key
                 else -> pal.mod
             }
-            canvas.drawRoundRect(rect, 9 * dp, 9 * dp, keyPaint)
+            if (bgBitmap != null) keyPaint.alpha = keyAlpha * 255 / 100
+            canvas.drawRoundRect(rect, keyRadiusDp * dp, keyRadiusDp * dp, keyPaint)
+            keyPaint.alpha = 255
             val ic: Drawable? = when (k.type) {
                 KeyType.SHIFT -> when (shift) { Shift.OFF -> icShift; Shift.ON -> icShiftOn; Shift.LOCK -> icShiftLock }
                 KeyType.BACKSPACE -> icBackspace
@@ -347,14 +482,16 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             val label = if (k.type == KeyType.CHAR && shift != Shift.OFF) k.label.uppercase() else k.label
             textPaint.color = pal.fg
             // smaller labels on short keys (height setting 80%) so the corner hint keeps its room
-            textPaint.textSize = if (label.length > 1) 14 * dp else minOf(22 * dp, rect.height() * 0.56f)
-            canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3, textPaint)
+            textPaint.textSize = if (label.length > 1) 14 * dp else minOf(22 * dp, rect.height() * 0.52f)
+            // letters sit a touch below centre when there's a hint, so the two never crowd each other
+            val lift = if (k.hint != null && hintScale > 0f && label.length == 1) 1.5f * dp else 0f
+            canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3 + lift, textPaint)
             // hint: the long-press default (digit / symbol), inset from the top-right corner
-            if (layer.isLetters && k.text != ".") {
-                KeyboardLayout.alternates(k).firstOrNull()?.let { alt ->
-                    textPaint.color = pal.dim; textPaint.textSize = 8.5f * dp
-                    canvas.drawText(alt, rect.right - 7.5f * dp, rect.top + 11 * dp, textPaint)
-                }
+            val hint = k.hint
+            if (hint != null && hintScale > 0f) {
+                textPaint.color = pal.dim; textPaint.textSize = 8.5f * dp * hintScale
+                // inner padding: tucked into the top-right corner, clear of the centred letter
+                canvas.drawText(hint, rect.right - (3.5f + 3f * hintScale) * dp, rect.top + (2.5f + 7.5f * hintScale) * dp, textPaint)
             }
         }
         drawPopups(canvas)
@@ -493,7 +630,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
 
     /** px -> model units of the letter area (same mapping as KeyboardLayout.modelTouch), clamped to the letter rows */
     private fun swipeTouch(x: Float, y: Float): Touch {
-        val ux = (x / keyW).toDouble().coerceIn(0.0, 10.0)
+        val ux = uOf(x).toDouble().coerceIn(0.0, 10.0)
         val uy = ((y - stripH) / rh - layer.letterRowOffset).toDouble() * KeyGeom.ROW_H
         return Touch(ux, uy.coerceIn(0.0, 3 * KeyGeom.ROW_H))
     }
@@ -508,9 +645,10 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             t.pts.add(swipeTouch(x, y))
             if (t.started) trailAdd(x, y, time)
             if (!t.started) {
-                val k = layer.keyAt(x / keyW, min((y - stripH) / rh, layer.rows - 0.01f))
+                val k = layer.keyAt(uOf(x), min((y - stripH) / rh, layer.rows - 0.01f))
                 if (isLetterKey(k) && k != t.lastKey) { t.lastKey = k; t.keys++ }
                 val moved = kotlin.math.hypot((x - t.startX) / keyW, (y - t.startY) / rh)
+                if (moved > 0.35 && !t.moving) { t.moving = true; invalidate() }
                 if (t.keys >= 2 && moved >= SWIPE_MIN_KEYS) startSwipe(t)
             }
         }
@@ -529,7 +667,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         val now = SystemClock.uptimeMillis()
         for (p in t.pts) {
             val yRow = p.y / KeyGeom.ROW_H + layer.letterRowOffset
-            trailAdd((p.x * keyW).toFloat(), (stripH + yRow * rh).toFloat(), now)
+            trailAdd(pxOf(p.x.toFloat()), (stripH + yRow * rh).toFloat(), now)
         }
         invalidate()
     }
@@ -560,8 +698,10 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             return
         }
         // key preview bubbles for held character keys
-        for (k in pressed.values) {
+        val tr = track
+        for ((pid, k) in pressed) {
             if (k.type != KeyType.CHAR) continue
+            if (tr != null && tr.pointer == pid && (tr.moving || tr.started)) continue   // turning into a swipe
             keyRect(k, rect)
             val w = rect.width() * 1.2f
             val h = rh * 1.05f
@@ -606,7 +746,12 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                     }
                     return true
                 }
-                val ux = x / keyW
+                // one-handed: a tap in the empty side moves the keys there
+                if (oneHanded != "off" && !split && (x < areaX0 || x > areaX0 + 10 * keyW)) {
+                    if (e.actionMasked == MotionEvent.ACTION_DOWN) listener.onOneHandedSwap()
+                    return true
+                }
+                val ux = uOf(x)
                 val uy = (y - stripH) / rh
                 val k = layer.keyAt(ux, min(uy, layer.rows - 0.01f)) ?: return true
                 val id = e.getPointerId(i)
@@ -622,10 +767,10 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 else if (k.type != KeyType.SPACE) listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
                 if (k.type == KeyType.BACKSPACE) { repeatKey = k; repeats = 0; ui.postDelayed(repeater, REPEAT_START_MS) }
                 if (k.type == KeyType.CHAR && k.text == "," && layer.isLetters) {
-                    commaDone = false; ui.removeCallbacks(commaLongPress); ui.postDelayed(commaLongPress, LONG_PRESS_ALT_MS)
+                    commaDone = false; ui.removeCallbacks(commaLongPress); ui.postDelayed(commaLongPress, longPressMs)
                 }
                 if (k.type == KeyType.CHAR && KeyboardLayout.alternates(k).isNotEmpty()) {
-                    ui.removeCallbacks(longPress); longPressPointer = id; ui.postDelayed(longPress, LONG_PRESS_ALT_MS)
+                    ui.removeCallbacks(longPress); longPressPointer = id; ui.postDelayed(longPress, longPressMs)
                 }
                 invalidate()
             }

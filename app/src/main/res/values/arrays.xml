@@ -28,4 +28,48 @@
         <item>1</item>
         <item>2</item>
     </string-array>
+    <string-array name="theme_modes">
+        <item>System</item>
+        <item>Light</item>
+        <item>Dark</item>
+    </string-array>
+    <string-array name="theme_modes_values">
+        <item>system</item>
+        <item>light</item>
+        <item>dark</item>
+    </string-array>
+    <string-array name="layouts">
+        <item>QWERTY</item>
+        <item>QWERTZ</item>
+        <item>AZERTY</item>
+        <item>Dvorak</item>
+        <item>Colemak</item>
+    </string-array>
+    <string-array name="layouts_values">
+        <item>qwerty</item>
+        <item>qwertz</item>
+        <item>azerty</item>
+        <item>dvorak</item>
+        <item>colemak</item>
+    </string-array>
+    <string-array name="hint_sizes">
+        <item>Small</item>
+        <item>Normal</item>
+        <item>Large</item>
+    </string-array>
+    <string-array name="hint_sizes_values">
+        <item>small</item>
+        <item>normal</item>
+        <item>large</item>
+    </string-array>
+    <string-array name="one_handed">
+        <item>Off</item>
+        <item>Left hand</item>
+        <item>Right hand</item>
+    </string-array>
+    <string-array name="one_handed_values">
+        <item>off</item>
+        <item>left</item>
+        <item>right</item>
+    </string-array>
 </resources>

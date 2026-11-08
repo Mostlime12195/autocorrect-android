@@ -28,6 +28,8 @@ interface Editor {
     fun replaceBefore(n: Int, text: String) { deleteBefore(n); commit(text) }
     /** same, with a likely-typo mark (SuggestionSpan in the app: red underline + the app's tap-to-fix menu) on a word of text */
     fun replaceBefore(n: Int, text: String, mark: TypoMark?) = replaceBefore(n, text)
+    /** cursor keys: "L", "R", "U", "D" */
+    fun moveCursor(dir: String) {}
     /** text after the cursor (suggest-only idle pass) */
     fun textAfter(n: Int): String = ""
     /** re-commit `text` (unchanged) starting `offset` chars from the cursor (negative = before it) with exactly these typo marks */
@@ -188,6 +190,7 @@ class KeyboardController(
         override fun replaceBefore(n: Int, text: String) { e.replaceBefore(n, text); pos += text.length - n; compLen = 0 }
         override fun replaceBefore(n: Int, text: String, mark: TypoMark?) { e.replaceBefore(n, text, mark); pos += text.length - n; compLen = 0 }
         override fun textAfter(n: Int) = e.textAfter(n)
+        override fun moveCursor(dir: String) { e.moveCursor(dir); invalidatePendings() }
         override fun remark(offset: Int, text: String, marks: List<TypoMark>) = e.remark(offset, text, marks)
         override fun beginBatch() = e.beginBatch()
         override fun endBatch() = e.endBatch()
@@ -335,8 +338,19 @@ class KeyboardController(
                 }
                 lastShiftTap = now
             }
-            KeyType.TO_SYMBOLS, KeyType.TO_SYMBOLS2, KeyType.TO_LETTERS -> {}
+            KeyType.CURSOR -> cursor(ed, k.text)
+            KeyType.TO_SYMBOLS, KeyType.TO_SYMBOLS2, KeyType.TO_LETTERS, KeyType.EMOJI -> {}
         }
+    }
+
+    /** cursor keys (optional row): the word being typed stays as typed, then the cursor moves */
+    private fun cursor(ed: Editor, dir: String) {
+        flushLast(); cancelSuggest()
+        if (composing.isNotEmpty()) { ed.commit(composing.toString()); resetWord() }
+        invalidatePendings(); prev = null; last = null; typo = null
+        ed.moveCursor(dir)
+        setStrip(emptyList(), -1, StripMode.NONE)
+        autoShift()
     }
 
     private fun releaseHold() {

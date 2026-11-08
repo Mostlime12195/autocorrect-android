@@ -29,7 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class SettingsActivity : AppCompatActivity() {
+class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPreferenceStartFragmentCallback {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
@@ -40,27 +40,67 @@ class SettingsActivity : AppCompatActivity() {
         }
         setSupportActionBar(findViewById(R.id.toolbar))
         if (savedInstanceState == null) supportFragmentManager.beginTransaction().replace(R.id.prefs, Fragment()).commit()
+        supportFragmentManager.addOnBackStackChangedListener {
+            supportActionBar?.setDisplayHomeAsUpEnabled(supportFragmentManager.backStackEntryCount > 0)
+            if (supportFragmentManager.backStackEntryCount == 0) supportActionBar?.title = getString(R.string.app_name)
+        }
+    }
+
+    override fun onSupportNavigateUp(): Boolean { onBackPressedDispatcher.onBackPressed(); return true }
+
+    /** a sub-screen (Typing, Correction, ...): the same fragment class with another XML */
+    override fun onPreferenceStartFragment(caller: PreferenceFragmentCompat, pref: Preference): Boolean {
+        val f = Fragment().apply { arguments = Bundle().apply { putString(Fragment.SCREEN, pref.key); putString(Fragment.TITLE, pref.title?.toString()) } }
+        supportFragmentManager.beginTransaction().replace(R.id.prefs, f).addToBackStack(pref.key).commit()
+        supportActionBar?.title = pref.title
+        return true
     }
 
     class Fragment : PreferenceFragmentCompat() {
         private val app get() = App.instance
 
+        private val screen get() = arguments?.getString(SCREEN)
+
+        companion object {
+            const val SCREEN = "screen"
+            const val TITLE = "title"
+        }
+
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-            setPreferencesFromResource(R.xml.prefs, rootKey)
+            setPreferencesFromResource(when (screen) {
+                "screen_typing" -> R.xml.prefs_typing
+                "screen_correction" -> R.xml.prefs_correction
+                "screen_dictionary" -> R.xml.prefs_dictionary
+                "screen_appearance" -> R.xml.prefs_appearance
+                "screen_model" -> R.xml.prefs_model
+                "screen_privacy" -> R.xml.prefs_privacy
+                "screen_updates" -> R.xml.prefs_updates
+                "screen_about" -> R.xml.prefs_about
+                else -> R.xml.prefs
+            }, rootKey)
+            setupAppearance()
             val m = app.store.manifest()
-            findPreference<ListPreference>(Prefs.MODEL)!!.apply {
+            findPreference<ListPreference>(Prefs.MODEL)?.apply {
                 entries = m.models.map { "${it.label} (${it.downloadBytes / 1_000_000} MB)" }.toTypedArray()
                 entryValues = m.models.map { it.id }.toTypedArray()
                 if (value == null) value = m.default
                 setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
             }
-            findPreference<Preference>(Prefs.BATTERY_SAVER)!!.setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
-            findPreference<ModelCard>("model_card")!!.onAction = { DownloadWorker.start(requireContext(), app.store.activeSpec().id) }
-            findPreference<Preference>("export")!!.setOnPreferenceClickListener { export(); true }
-            findPreference<Preference>("stats_reset")!!.setOnPreferenceClickListener {
+            findPreference<androidx.preference.SwitchPreferenceCompat>(Prefs.BATTERY_SAVER)?.apply {
+                isChecked = app.prefs.batterySaver
+                val lite = app.store.manifest().let { m -> m.model(m.batterySaver) }
+                isVisible = lite != null
+                val why = dev.mostlime.autocorrect.Device.reason(requireContext())
+                summary = "Smaller and faster (${lite?.label ?: "34M"}), a bit less accurate." +
+                    if (why != null) " On by default because $why." else ""
+                setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
+            }
+            findPreference<ModelCard>("model_card")?.onAction = { DownloadWorker.start(requireContext(), app.store.activeSpec().id) }
+            findPreference<Preference>("export")?.setOnPreferenceClickListener { export(); true }
+            findPreference<Preference>("stats_reset")?.setOnPreferenceClickListener {
                 app.prefs.statsResetAt = System.currentTimeMillis(); refresh(); true
             }
-            findPreference<Preference>("clear")!!.setOnPreferenceClickListener {
+            findPreference<Preference>("clear")?.setOnPreferenceClickListener {
                 MaterialAlertDialogBuilder(requireContext()).setTitle("Clear local data?")
                     .setMessage("Deletes the correction log stored on this phone. Already uploaded data is not affected.")
                     .setPositiveButton("Clear") { _, _ ->
@@ -68,19 +108,30 @@ class SettingsActivity : AppCompatActivity() {
                     }.setNegativeButton("Cancel", null).show()
                 true
             }
-            findPreference<Preference>(Prefs.SHARE)!!.setOnPreferenceChangeListener { _, on ->
+            findPreference<Preference>(Prefs.SHARE)?.setOnPreferenceChangeListener { _, on ->
                 // opt-in applies to new events only: start uploading from the current end of the log
                 if (on == true) lifecycleScope.launch { app.prefs.uploadOffset = withContext(Dispatchers.IO) { app.events.endOffset() } }
                 view?.post { UploadWorker.schedule(requireContext(), app.prefs) }
                 true
             }
-            val confident = findPreference<Preference>(Prefs.CONFIDENT_ONLY)!!
-            confident.isEnabled = !app.prefs.suggestOnly
-            findPreference<Preference>(Prefs.CORRECTION_MODE)!!.setOnPreferenceChangeListener { _, v -> confident.isEnabled = v != "suggest"; true }
-            findPreference<Preference>("dictionary")!!.setOnPreferenceClickListener {
+            val confident = findPreference<Preference>(Prefs.CONFIDENT_ONLY)
+            confident?.isEnabled = !app.prefs.suggestOnly
+            findPreference<Preference>(Prefs.CORRECTION_MODE)?.setOnPreferenceChangeListener { _, v -> confident?.isEnabled = v != "suggest"; true }
+            findPreference<Preference>("clear_learned")?.setOnPreferenceClickListener {
+                app.user.clearLearned(); Toast.makeText(requireContext(), "Undone edits forgotten", Toast.LENGTH_SHORT).show(); true
+            }
+            findPreference<Preference>("refresh_models")?.setOnPreferenceClickListener {
+                lifecycleScope.launch {
+                    val ok = withContext(Dispatchers.IO) { runCatching { app.store.refreshManifest(app.prefs.manifestUrls) }.getOrDefault(false) }
+                    Toast.makeText(requireContext(), if (ok) "Model list updated" else "Couldn't fetch the model list", Toast.LENGTH_SHORT).show()
+                    refresh()
+                }
+                true
+            }
+            findPreference<Preference>("dictionary")?.setOnPreferenceClickListener {
                 startActivity(Intent(requireContext(), DictionaryActivity::class.java)); true
             }
-            findPreference<Preference>("delete_uploaded")!!.setOnPreferenceClickListener {
+            findPreference<Preference>("delete_uploaded")?.setOnPreferenceClickListener {
                 MaterialAlertDialogBuilder(requireContext()).setTitle("Delete your uploaded data?")
                     .setMessage("Deletes everything this phone has uploaded from the server and clears the log and personal dictionary on this phone. " +
                         "If sharing stays on, future uploads use a new random ID that isn't linked to the old data.")
@@ -96,17 +147,17 @@ class SettingsActivity : AppCompatActivity() {
                     }.setNegativeButton("Cancel", null).show()
                 true
             }
-            findPreference<Preference>(Prefs.WIFI_ONLY)!!.setOnPreferenceChangeListener { _, _ -> view?.post { UploadWorker.schedule(requireContext(), app.prefs) }; true }
-            findPreference<androidx.preference.EditTextPreference>(Prefs.UPLOAD_URL)!!.apply {
+            findPreference<Preference>(Prefs.WIFI_ONLY)?.setOnPreferenceChangeListener { _, _ -> view?.post { UploadWorker.schedule(requireContext(), app.prefs) }; true }
+            findPreference<androidx.preference.EditTextPreference>(Prefs.UPLOAD_URL)?.apply {
                 // older builds saved the example.invalid placeholder here
                 if (text.isNullOrBlank() || text!!.contains(".invalid")) text = Prefs.DEFAULT_UPLOAD_URL
                 summaryProvider = Preference.SummaryProvider<androidx.preference.EditTextPreference> { app.prefs.uploadUrl }
             }
-            findPreference<Preference>("version")!!.summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-            findPreference<Preference>("check_updates")!!.setOnPreferenceClickListener { checkUpdates(manual = true); true }
-            findPreference<Preference>("update_banner")!!.setOnPreferenceClickListener { Updater.pending()?.let { installUpdate(it) }; true }
+            findPreference<Preference>("version")?.summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+            findPreference<Preference>("check_updates")?.setOnPreferenceClickListener { checkUpdates(manual = true); true }
+            findPreference<Preference>("update_banner")?.setOnPreferenceClickListener { Updater.pending()?.let { installUpdate(it) }; true }
             showUpdate()
-            checkUpdates(manual = false)
+            if (screen == null || screen == "screen_updates") checkUpdates(manual = false)
             // notifications for updates found in the background (Android 13+ asks once)
             if (android.os.Build.VERSION.SDK_INT >= 33 && savedInstanceState == null &&
                 requireContext().checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
@@ -116,7 +167,7 @@ class SettingsActivity : AppCompatActivity() {
                 showDownload(infos.firstOrNull())
             }
             // first run: fetch the manifest and start the default model download
-            lifecycleScope.launch {
+            if (screen == null) lifecycleScope.launch {
                 withContext(Dispatchers.IO) { app.store.refreshManifest(app.prefs.manifestUrls) }
                 val spec = app.store.activeSpec()
                 if (!app.store.isInstalled(spec)) DownloadWorker.start(requireContext(), spec.id)
@@ -126,6 +177,7 @@ class SettingsActivity : AppCompatActivity() {
 
         override fun onResume() {
             super.onResume()
+            arguments?.getString(TITLE)?.let { (activity as? AppCompatActivity)?.supportActionBar?.apply { title = it; setDisplayHomeAsUpEnabled(true) } }
             refresh()
         }
 
@@ -138,6 +190,126 @@ class SettingsActivity : AppCompatActivity() {
         private var download: WorkInfo? = null
 
         private fun showDownload(w: WorkInfo?) { download = w; refresh() }
+
+        // ------------------------------------------------------------------ appearance
+        private val pickImage = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) lifecycleScope.launch {
+                val ok = withContext(Dispatchers.IO) { runCatching { saveBackground(uri) }.getOrDefault(false) }
+                if (ok) app.prefs.bgStamp = System.currentTimeMillis()
+                Toast.makeText(requireContext(), if (ok) "Background set" else "Couldn't read that image", Toast.LENGTH_SHORT).show()
+                refreshAppearance()
+            }
+        }
+
+        /** a copy at screen width (the keyboard crops it to its own size); one JPEG in app storage */
+        private fun saveBackground(uri: android.net.Uri): Boolean {
+            val cr = requireContext().contentResolver
+            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) } ?: return false
+            if (o.outWidth <= 0) return false
+            val target = resources.displayMetrics.widthPixels.coerceAtMost(1440)
+            var sample = 1
+            while (o.outWidth / (sample * 2) >= target) sample *= 2
+            val src = cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) } ?: return false
+            val h = (src.height * target / src.width.toFloat()).toInt().coerceAtLeast(1)
+            val scaled = if (src.width > target) android.graphics.Bitmap.createScaledBitmap(src, target, h, true).also { src.recycle() } else src
+            Prefs.bgFile(requireContext()).outputStream().use { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+            scaled.recycle()
+            return true
+        }
+
+        private fun setupAppearance() {
+            findPreference<ListPreference>(Prefs.THEME_COLOR)?.apply {
+                val dyn = android.os.Build.VERSION.SDK_INT >= 31
+                val names = (if (dyn) listOf("Material You (wallpaper colors)") else emptyList()) + listOf("Green (original)") +
+                    Prefs.SWATCHES.map { it.first } + listOf("Custom")
+                val values = (if (dyn) listOf("dynamic") else emptyList()) + listOf("green") + Prefs.SWATCHES.map { it.second } + listOf("custom")
+                entries = names.toTypedArray(); entryValues = values.toTypedArray()
+                if (value == null) value = app.prefs.themeColor
+                setOnPreferenceChangeListener { _, _ -> view?.post { refreshAppearance() }; true }
+            }
+            findPreference<Preference>(Prefs.CUSTOM_COLOR)?.setOnPreferenceClickListener { colorDialog(); true }
+            findPreference<Preference>("kb_bg")?.setOnPreferenceClickListener {
+                pickImage.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)); true
+            }
+            findPreference<Preference>("kb_bg_remove")?.setOnPreferenceClickListener {
+                Prefs.bgFile(requireContext()).delete(); app.prefs.bgStamp = 0L; refreshAppearance(); true
+            }
+            findPreference<Preference>(Prefs.BG_BLUR)?.isVisible = android.os.Build.VERSION.SDK_INT >= 31
+            findPreference<androidx.preference.EditTextPreference>(Prefs.CUSTOM_LONGPRESS)?.apply {
+                setOnBindEditTextListener { it.isSingleLine = false; it.minLines = 3; it.setHorizontallyScrolling(false) }
+                summaryProvider = Preference.SummaryProvider<androidx.preference.EditTextPreference> { p ->
+                    val n = dev.mostlime.autocorrect.ime.KeyboardLayout.parseExtra(p.text.orEmpty()).size
+                    if (n == 0) "Add your own characters or strings to any key's popup" else "Entries on $n key${if (n == 1) "" else "s"}"
+                }
+            }
+            refreshAppearance()
+        }
+
+        private fun refreshAppearance() {
+            val hasBg = app.prefs.bgStamp > 0 && Prefs.bgFile(requireContext()).exists()
+            findPreference<Preference>("kb_bg")?.summary = if (hasBg) "Set. Tap to pick another image." else "Pick an image (no storage permission needed)"
+            findPreference<Preference>("kb_bg_remove")?.isVisible = hasBg
+            for (k in listOf(Prefs.BG_DIM, Prefs.BG_BLUR, Prefs.KEY_ALPHA)) findPreference<Preference>(k)?.isEnabled = hasBg
+            findPreference<Preference>(Prefs.CUSTOM_COLOR)?.apply {
+                isVisible = app.prefs.themeColor == "custom"
+                summary = app.prefs.customColor.uppercase()
+            }
+        }
+
+        /** hex field + hue / saturation / brightness sliders with a preview swatch */
+        private fun colorDialog() {
+            val ctx = requireContext()
+            val dp = resources.displayMetrics.density
+            val hsv = FloatArray(3)
+            android.graphics.Color.colorToHSV(Prefs.parseColor(app.prefs.customColor) ?: 0xFF1E88E5.toInt(), hsv)
+            val box = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding((24 * dp).toInt(), (8 * dp).toInt(), (24 * dp).toInt(), 0) }
+            val swatch = View(ctx)
+            box.addView(swatch, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, (48 * dp).toInt()))
+            val hex = android.widget.EditText(ctx).apply { isSingleLine = true; hint = "#RRGGBB" }
+            box.addView(hex)
+            var updating = false
+            fun color() = android.graphics.Color.HSVToColor(hsv)
+            val bars = listOf("Hue" to 360, "Saturation" to 100, "Brightness" to 100).mapIndexed { i, (label, max) ->
+                box.addView(android.widget.TextView(ctx).apply { text = label })
+                android.widget.SeekBar(ctx).apply { this.max = max; progress = if (i == 0) hsv[0].toInt() else (hsv[i] * 100).toInt() }.also { box.addView(it) }
+            }
+            fun show() {
+                updating = true
+                swatch.setBackgroundColor(color())
+                val h = "#%06X".format(color() and 0xFFFFFF)
+                if (hex.text.toString().uppercase() != h) hex.setText(h)
+                updating = false
+            }
+            bars.forEachIndexed { i, b ->
+                b.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
+                        if (!fromUser) return
+                        hsv[i] = if (i == 0) p.toFloat() else p / 100f; show()
+                    }
+                    override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+                    override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
+                })
+            }
+            hex.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(e: android.text.Editable?) {
+                    if (updating) return
+                    val c = Prefs.parseColor(e.toString()) ?: return
+                    android.graphics.Color.colorToHSV(c, hsv)
+                    bars[0].progress = hsv[0].toInt(); bars[1].progress = (hsv[1] * 100).toInt(); bars[2].progress = (hsv[2] * 100).toInt()
+                    swatch.setBackgroundColor(c)
+                }
+            })
+            show()
+            MaterialAlertDialogBuilder(ctx).setTitle("Custom color").setView(box)
+                .setPositiveButton("Use") { _, _ ->
+                    app.prefs.sp.edit().putString(Prefs.CUSTOM_COLOR, "#%06X".format(color() and 0xFFFFFF)).putString(Prefs.THEME_COLOR, "custom").apply()
+                    findPreference<ListPreference>(Prefs.THEME_COLOR)?.value = "custom"
+                    refreshAppearance()
+                }.setNegativeButton("Cancel", null).show()
+        }
 
         private val notifPermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
 
@@ -205,6 +377,7 @@ class SettingsActivity : AppCompatActivity() {
             val installed = app.store.isInstalled(spec)
             val w = download
             val running = w?.state == WorkInfo.State.RUNNING || w?.state == WorkInfo.State.ENQUEUED
+            findPreference<SetupCard>("setup_card")?.isVisible = !(enabled && current && installed)
             findPreference<SetupCard>("setup_card")?.steps = listOf(
                 SetupCard.Step("Enable the keyboard", if (enabled) "Enabled" else "Turn on \"Autocorrect keyboard\" in system settings", enabled, "Enable") {
                     startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))

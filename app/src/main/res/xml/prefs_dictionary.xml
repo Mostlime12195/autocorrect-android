@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+        <Preference app:key="dictionary" app:title="Personal dictionary" app:summary="Words that are never corrected or flagged" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="learn_undo" app:title="Learn from undos" app:defaultValue="true" app:summary="Undoing the same spelling fix twice adds the word to your dictionary" app:iconSpaceReserved="false" />
+        <Preference app:key="clear_learned" app:title="Forget undone edits" app:summary="Edits you undid (their/there, commas, capitals) are made harder for 7 days. Tap to reset that." app:iconSpaceReserved="false" />
+
+</PreferenceScreen>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+        <Preference app:key="check_updates" app:title="Check for updates" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="auto_update" app:title="Auto-download updates" app:defaultValue="true"
+            app:summary="Download new versions on Wi-Fi in the background. Android still asks before installing." app:iconSpaceReserved="false" />
+
+</PreferenceScreen>

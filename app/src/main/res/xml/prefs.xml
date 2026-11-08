@@ -1,76 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
-
-    <dev.mostlime.autocorrect.ui.SetupCard app:key="setup_card" />
-    <dev.mostlime.autocorrect.ui.ModelCard app:key="model_card" />
-
-    <PreferenceCategory app:title="Typing" app:iconSpaceReserved="false">
-        <SwitchPreferenceCompat app:key="autocorrect" app:title="Autocorrect" app:defaultValue="true"
-            app:summary="Correct the word on space / punctuation. Backspace right after a correction undoes it." app:iconSpaceReserved="false" />
-        <ListPreference app:key="correction_mode" app:title="Correction mode" app:defaultValue="auto"
-            app:entries="@array/correction_modes" app:entryValues="@array/correction_mode_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="confident_only" app:title="Only auto-correct when confident" app:defaultValue="false"
-            app:summary="Unsure corrections are underlined and suggested instead of applied" app:iconSpaceReserved="false" />
-        <Preference app:key="dictionary" app:title="Personal dictionary"
-            app:summary="Words that are never corrected or flagged" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="auto_cap" app:title="Auto-capitalize" app:defaultValue="true"
-            app:summary="Capital letter at the start of a sentence (shift and corrections), when the text field allows it" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="swipe_typing" app:title="Swipe typing" app:defaultValue="true"
-            app:summary="Slide across the letters to type a word. The strip shows alternatives; backspace right after removes it." app:iconSpaceReserved="false" />
- <SwitchPreferenceCompat app:key="clipboard" app:title="Clipboard suggestions and history" app:defaultValue="true"
-            app:summary="Offer recently copied text and keep the last 10 copies on this phone. Never from password or sensitive clips." app:iconSpaceReserved="false" />
-        <ListPreference app:key="style" app:title="Style" app:defaultValue="standard"
-            app:entries="@array/styles" app:entryValues="@array/style_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="haptics" app:title="Vibrate on key press" app:defaultValue="true" app:iconSpaceReserved="false" />
-        <ListPreference app:key="haptic_strength" app:title="Vibration strength" app:defaultValue="1" app:dependency="haptics"
-            app:entries="@array/haptic_strengths" app:entryValues="@array/haptic_strength_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
-    </PreferenceCategory>
-
-    <PreferenceCategory app:title="Layout" app:iconSpaceReserved="false">
-        <SwitchPreferenceCompat app:key="number_row" app:title="Number row" app:defaultValue="false"
-            app:summary="Always show 1 – 0 above the letters" app:iconSpaceReserved="false" />
-        <SeekBarPreference app:key="kb_height" app:title="Keyboard height (%)" app:defaultValue="100" android:max="130" app:min="80"
-            app:seekBarIncrement="5" app:showSeekBarValue="true" app:iconSpaceReserved="false" xmlns:android="http://schemas.android.com/apk/res/android" />
-    </PreferenceCategory>
-
-    <PreferenceCategory app:title="Model" app:iconSpaceReserved="false">
-        <ListPreference app:key="model" app:title="Model" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="battery_saver" app:title="Battery saver" app:defaultValue="false"
-            app:summary="Use the small 34M model instead of m2" app:iconSpaceReserved="false" />
-        <Preference app:key="stats" app:title="Stats" app:selectable="false" app:iconSpaceReserved="false" />
-        <Preference app:key="stats_reset" app:title="Reset stats" app:summary="Count from now on (the log itself is kept)" app:iconSpaceReserved="false" />
-    </PreferenceCategory>
-
-    <PreferenceCategory app:title="Your data" app:iconSpaceReserved="false">
-        <Preference app:key="log_info" app:title="Local log" app:selectable="false" app:iconSpaceReserved="false" />
-        <Preference app:key="export" app:title="Export local data" app:summary="Share the event log as JSONL" app:iconSpaceReserved="false" />
-        <Preference app:key="clear" app:title="Clear local data" app:summary="Delete the event log on this phone" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="share_data" app:title="Share typing data to improve autocorrect" app:defaultValue="false"
-            app:summaryOff="Off. Nothing leaves this phone unless you turn this on."
-            app:summaryOn="On. New correction events are uploaded about every 6 hours." app:iconSpaceReserved="false" />
-        <Preference app:key="share_info" app:title="What gets sent" app:selectable="false" app:iconSpaceReserved="false"
-            app:summary="Sharing is opt-in and off until you switch it on. Only events logged after you switch it on are sent, about every 6 hours (on Wi-Fi only unless you change that).\n\nFor each word the keyboard corrected: the word as you typed it, where your finger touched each key, up to 120 characters of text before it (and the next few words for to/too-style fixes), the suggestions it considered, what it picked and whether you kept it, plus the style, model and app version. For words it left alone: only timing numbers, no text.\n\nNothing typed in password, incognito, email, web address, number, phone or date fields is ever recorded, so it can never be sent.\n\nUploads carry a random ID made by this app, not your name, account or phone ID. The server doesn’t store IP addresses. It’s used only to improve this autocorrect." />
-        <SwitchPreferenceCompat app:key="upload_wifi_only" app:title="Upload on Wi-Fi only" app:defaultValue="true" app:dependency="share_data" app:iconSpaceReserved="false" />
-        <EditTextPreference app:key="upload_url" app:title="Upload server URL" app:dependency="share_data" app:iconSpaceReserved="false" />
-        <Preference app:key="delete_uploaded" app:title="Delete my uploaded data"
-            app:summary="Remove everything this phone has sent from the server, clear the local log and personal dictionary, and start over with a new random ID" app:iconSpaceReserved="false" />
-    </PreferenceCategory>
-
-    <PreferenceCategory app:title="Advanced" app:iconSpaceReserved="false">
-        <SwitchPreferenceCompat app:key="debug_overlay" app:title="Debug overlay" app:defaultValue="false"
-            app:summary="Show model, timings and top candidates in the suggestion strip" app:iconSpaceReserved="false" />
-    </PreferenceCategory>
-
-    <PreferenceCategory app:title="Updates" app:iconSpaceReserved="false">
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+        <dev.mostlime.autocorrect.ui.SetupCard app:key="setup_card" />
+        <dev.mostlime.autocorrect.ui.ModelCard app:key="model_card" />
         <Preference app:key="update_banner" app:title="Update available" app:isPreferenceVisible="false" app:iconSpaceReserved="false" />
-        <Preference app:key="check_updates" app:title="Check for updates" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="auto_update" app:title="Auto-download updates" app:defaultValue="true"
-            app:summary="Download new versions on Wi-Fi in the background. Android still asks before installing." app:iconSpaceReserved="false" />
+
+    <PreferenceCategory app:title="Settings" app:iconSpaceReserved="false">
+        <Preference app:key="screen_typing" app:title="Typing" app:summary="Capitals, swipe, long-press, vibration, clipboard" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_correction" app:title="Correction" app:summary="Style, auto-correct or suggest only" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_dictionary" app:title="Dictionary" app:summary="Your words, learning from undos" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_appearance" app:title="Appearance" app:summary="Theme, color, background, layout, keys" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_model" app:title="Model" app:summary="Model choice, download, stats" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_privacy" app:title="Privacy and data" app:summary="Local log, opt-in sharing, delete my data" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_updates" app:title="Updates" app:summary="Check for updates, auto-download" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_about" app:title="About" app:summary="Version, licenses" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
-    <PreferenceCategory app:title="About" app:iconSpaceReserved="false">
-        <Preference app:key="version" app:title="Version" app:selectable="false" app:iconSpaceReserved="false" />
-        <Preference app:key="licenses" app:title="Open-source licenses" app:selectable="false" app:iconSpaceReserved="false"
-            app:summary="Icons: Material Symbols by Google, Apache License 2.0 (github.com/google/material-design-icons).\nonnxruntime: MIT License (Microsoft). AndroidX, Material Components, Kotlin, kotlinx: Apache License 2.0.\nEmoji data: Unicode emoji-test.txt, © Unicode, Inc., Unicode License v3.\nModels and lexicon: github.com/Mostlime12195/autocorrect-models." />
-    </PreferenceCategory>
 </PreferenceScreen>

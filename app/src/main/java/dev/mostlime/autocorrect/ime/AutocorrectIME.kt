@@ -12,6 +12,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.BuildConfig
+import dev.mostlime.autocorrect.Prefs
 import dev.mostlime.autocorrect.engine.DecodeParams
 import dev.mostlime.autocorrect.engine.Rewind
 import dev.mostlime.autocorrect.engine.RewindChange
@@ -46,6 +47,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         private val ic get() = currentInputConnection
         override fun textBefore(n: Int) = ic?.getTextBeforeCursor(n, 0)?.toString() ?: ""
         override fun textAfter(n: Int) = ic?.getTextAfterCursor(n, 0)?.toString() ?: ""
+        override fun moveCursor(dir: String) {
+            sendDownUpKeyEvents(when (dir) { "L" -> KeyEvent.KEYCODE_DPAD_LEFT; "R" -> KeyEvent.KEYCODE_DPAD_RIGHT; "U" -> KeyEvent.KEYCODE_DPAD_UP; else -> KeyEvent.KEYCODE_DPAD_DOWN })
+        }
         /** same text, fresh SuggestionSpans: replace [cursor + offset, + len) and put the cursor back */
         override fun remark(offset: Int, text: String, marks: List<TypoMark>) {
             val c = ic ?: return
@@ -224,7 +228,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         override fun removeWord(w: String) = app.user.remove(w)
         override fun suppress(typed: String, chosen: String) = app.user.suppress(typed, chosen)
         override fun penalty(typed: String, chosen: String) = app.user.penalty(typed, chosen)
-        override fun noteSpellingUndo(typed: String) = app.user.noteSpellingUndo(typed)
+        override fun noteSpellingUndo(typed: String) = if (app.prefs.learnUndo) app.user.noteSpellingUndo(typed) else 0
     }
 
     private val ui = object : ControllerUi {
@@ -290,7 +294,14 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         }, { ctl.key(KeyboardLayout.LETTERS.keys.first { it.type == KeyType.BACKSPACE }, Touch.APOS) }) { r.hidePanel() })
     }
 
-    private fun letters() = KeyboardLayout.letters(app.prefs.numberRow)
+    /** layers for the current layout options (rebuilt at input start) */
+    private var lettersLayer: Layer = KeyboardLayout.LETTERS
+    private var symbolsLayer: Layer = KeyboardLayout.SYMBOLS
+    private var symbols2Layer: Layer = KeyboardLayout.SYMBOLS2
+    private var layoutOpts: LayoutOptions? = null
+    private fun letters() = lettersLayer
+    /** colors the current view was built with (a change rebuilds the view) */
+    private var themeSig = ""
 
     private fun showClipboard() {
         val r = root ?: return
@@ -325,13 +336,35 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         app.prefs.reload()   // settings live in the app process
         info = editorInfo
         val policy = FieldPolicy.of(editorInfo)
+        val o = app.prefs.layoutOptions()
+        if (o != layoutOpts) {
+            layoutOpts = o
+            lettersLayer = KeyboardLayout.letters(o); symbolsLayer = KeyboardLayout.symbols(o); symbols2Layer = KeyboardLayout.symbols2(o)
+        }
+        EngineHolder.applyLayout(lettersLayer)
+        KeyboardLayout.extra = KeyboardLayout.parseExtra(app.prefs.customLongPress)
+        val sig = listOf(app.prefs.themeMode, app.prefs.themeColor, app.prefs.customColor,
+            resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK).joinToString()
+        if (sig != themeSig) {
+            val first = themeSig.isEmpty()
+            themeSig = sig
+            if (!first || kv == null) setInputView(onCreateInputView())
+        }
         val v = kv
+        v?.keyGapDp = app.prefs.keyGap.toFloat()
+        v?.keyRadiusDp = app.prefs.keyRadius.toFloat()
+        v?.hintScale = if (!app.prefs.showHints) 0f else when (app.prefs.hintSize) { "small" -> 0.8f; "large" -> 1.25f; else -> 1f }
+        v?.longPressMs = app.prefs.longPressMs.toLong()
+        v?.keyAlpha = app.prefs.keyAlpha
+        v?.setBackgroundImage(Prefs.bgFile(this).takeIf { app.prefs.bgStamp > 0 }, app.prefs.bgDim, app.prefs.bgBlur)
+        v?.oneHanded = app.prefs.oneHanded
+        v?.split = app.prefs.splitLandscape && resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         v?.haptics = app.prefs.haptics
         v?.swipeEnabled = app.prefs.swipe && policy.autocorrect
         v?.hapticStrength = app.prefs.hapticStrength
         v?.heightScale = app.prefs.heightPercent / 100f
         v?.baseRows = letters().rows
-        v?.layer = if (policy.numeric) KeyboardLayout.SYMBOLS else letters()
+        v?.layer = if (policy.numeric) symbolsLayer else letters()
         v?.enterLabel = enterLabel(editorInfo)
         ctl.lettersLayer = v?.layer?.isLetters == true
         app.user.reloadIfChanged()   // the settings screen may have edited the dictionary
@@ -377,8 +410,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     // ---------------------------------------------------------------- KeyboardView.Listener
     override fun onKey(key: KeyDef, touch: Touch) {
         when (key.type) {
-            KeyType.TO_SYMBOLS -> kv?.layer = KeyboardLayout.SYMBOLS
-            KeyType.TO_SYMBOLS2 -> kv?.layer = KeyboardLayout.SYMBOLS2
+            KeyType.TO_SYMBOLS -> kv?.layer = symbolsLayer
+            KeyType.TO_SYMBOLS2 -> kv?.layer = symbols2Layer
+            KeyType.EMOJI -> { showEmoji(); return }
             KeyType.TO_LETTERS -> kv?.layer = letters()
             else -> { ctl.key(key, touch); return }
         }
@@ -388,6 +422,12 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     override fun onSuggestion(index: Int) = ctl.pickSuggestion(index)
 
+    override fun onOneHandedSwap() {
+        val side = if (app.prefs.oneHanded == "left") "right" else "left"
+        app.prefs.oneHanded = side
+        kv?.oneHanded = side
+    }
+
     override fun onSuggestionLongPress(index: Int) = ctl.longPressSuggestion(index)
 
     override fun onStripAction() = ctl.stripAction()
@@ -396,7 +436,10 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     override fun onSwipe(path: List<Touch>) = ctl.swipe(path)
 
-    override fun onAlternate(text: String) = ctl.replaceLastChar(text)
+    /** popup choice: one character replaces the pressed letter; a longer entry takes it back and goes in as text */
+    override fun onAlternate(text: String) {
+        if (text.codePointCount(0, text.length) <= 1) ctl.replaceLastChar(text) else { ctl.replaceLastChar(""); ctl.insertText(text) }
+    }
 
     override fun onClipboard() = showClipboard()
 

@@ -22,7 +22,8 @@ class Prefs(private val ctx: Context) {
     var model: String
         get() = sp.getString(MODEL, "") ?: ""
         set(v) = sp.edit().putString(MODEL, v).apply()
-    val batterySaver get() = sp.getBoolean(BATTERY_SAVER, false)
+    /** the Lite (34M) model: default on for low-end phones (Device.lowEnd) */
+    val batterySaver get() = sp.getBoolean(BATTERY_SAVER, Device.lowEnd(ctx))
     val style get() = sp.getString(STYLE, "standard") ?: "standard"
     val autocorrect get() = sp.getBoolean(AUTOCORRECT, true)
     /** sentence-start capitals (auto-shift + the corrector's sentence capitals) */
@@ -33,7 +34,23 @@ class Prefs(private val ctx: Context) {
     val swipe get() = sp.getBoolean(SWIPE, true)
     val clipboard get() = sp.getBoolean(CLIPBOARD, true)
     val numberRow get() = sp.getBoolean(NUMBER_ROW, false)
-    val heightPercent get() = sp.getInt(HEIGHT, 100).coerceIn(80, 130)
+    /** keys a little taller than before 0.1.50 by default (more room for the corner hint) */
+    val heightPercent get() = sp.getInt(HEIGHT, DEFAULT_HEIGHT).coerceIn(80, 130)
+    // layout
+    val layout get() = sp.getString(LAYOUT, "qwerty") ?: "qwerty"
+    val emojiKey get() = sp.getBoolean(EMOJI_KEY, false)
+    val commaKey get() = sp.getBoolean(COMMA_KEY, true)
+    val arrowRow get() = sp.getBoolean(ARROW_ROW, false)
+    /** "off", "left", "right" */
+    var oneHanded: String
+        get() = sp.getString(ONE_HANDED, "off") ?: "off"
+        set(v) = sp.edit().putString(ONE_HANDED, v).apply()
+    val splitLandscape get() = sp.getBoolean(SPLIT_LANDSCAPE, false)
+    val keyRadius get() = sp.getInt(KEY_RADIUS, 9).coerceIn(0, 20)
+    val showHints get() = sp.getBoolean(SHOW_HINTS, true)
+    /** "key: entry entry" per line (KeyboardLayout.parseExtra) */
+    val customLongPress get() = sp.getString(CUSTOM_LONGPRESS, "") ?: ""
+    fun layoutOptions() = dev.mostlime.autocorrect.ime.LayoutOptions(layout, numberRow, emojiKey, commaKey, arrowRow)
     val debugOverlay get() = sp.getBoolean(DEBUG, false)
     val haptics get() = sp.getBoolean(HAPTICS, true)
     val hapticStrength get() = (sp.getString(HAPTIC_STRENGTH, "1") ?: "1").toIntOrNull() ?: 1
@@ -46,6 +63,29 @@ class Prefs(private val ctx: Context) {
     val uploadUrl get() = (sp.getString(UPLOAD_URL, null) ?: "").trim().takeUnless { it.isBlank() || it.contains(".invalid") } ?: DEFAULT_UPLOAD_URL
     /** manifest mirrors, tried in order (a custom URL in settings replaces them) */
     val manifestUrls: List<String> get() = (sp.getString(MANIFEST_URL, null) ?: "").ifBlank { null }?.let { listOf(it) } ?: DEFAULT_MANIFEST_URLS
+
+    // appearance
+    val themeMode get() = sp.getString(THEME_MODE, "system") ?: "system"
+    /** "dynamic" (Material You, default on Android 12+), "green" (default before), "custom" or a swatch "#RRGGBB" */
+    val themeColor get() = sp.getString(THEME_COLOR, null) ?: if (android.os.Build.VERSION.SDK_INT >= 31) "dynamic" else "green"
+    val customColor get() = sp.getString(CUSTOM_COLOR, "#1E88E5") ?: "#1E88E5"
+    /** the accent as a color, or null for Material You / green */
+    fun accentColor(): Int? = when (val c = themeColor) {
+        "dynamic", "green" -> null
+        "custom" -> parseColor(customColor)
+        else -> parseColor(c)
+    }
+    var bgStamp: Long
+        get() = sp.getLong(BG_STAMP, 0L)
+        set(v) = sp.edit().putLong(BG_STAMP, v).apply()
+    val bgDim get() = sp.getInt(BG_DIM, 30).coerceIn(0, 80)
+    val bgBlur get() = sp.getInt(BG_BLUR, 0).coerceIn(0, 25)
+    val keyAlpha get() = sp.getInt(KEY_ALPHA, 75).coerceIn(20, 100)
+    val keyGap get() = sp.getInt(KEY_GAP, 3).coerceIn(1, 8)
+    val hintSize get() = sp.getString(HINT_SIZE, "normal") ?: "normal"
+    val longPressMs get() = sp.getInt(LONG_PRESS_MS, 380).coerceIn(200, 800)
+    /** two undos of the same spelling fix add the word to the dictionary */
+    val learnUndo get() = sp.getBoolean(LEARN_UNDO, true)
 
     /** in-app updates: last latest.json seen, auto-download (default on), last version notified */
     var latestJson: String?
@@ -84,7 +124,17 @@ class Prefs(private val ctx: Context) {
         const val SWIPE = "swipe_typing"
         const val CLIPBOARD = "clipboard"
         const val NUMBER_ROW = "number_row"
+        const val LAYOUT = "kb_layout"
+        const val EMOJI_KEY = "emoji_key"
+        const val COMMA_KEY = "comma_key"
+        const val ARROW_ROW = "arrow_row"
+        const val ONE_HANDED = "one_handed"
+        const val SPLIT_LANDSCAPE = "split_landscape"
+        const val KEY_RADIUS = "key_radius"
+        const val SHOW_HINTS = "show_hints"
+        const val CUSTOM_LONGPRESS = "custom_longpress"
         const val HEIGHT = "kb_height"
+        const val DEFAULT_HEIGHT = 108
         const val DEBUG = "debug_overlay"
         const val HAPTICS = "haptics"
         const val HAPTIC_STRENGTH = "haptic_strength"
@@ -96,6 +146,17 @@ class Prefs(private val ctx: Context) {
         const val UPLOAD_OFFSET = "upload_offset"
         const val INSTALL_ID = "install_id"
         const val PENDING_DELETES = "pending_deletes"
+        const val THEME_MODE = "theme_mode"
+        const val THEME_COLOR = "theme_color"
+        const val CUSTOM_COLOR = "custom_color"
+        const val BG_STAMP = "kb_bg_stamp"
+        const val BG_DIM = "bg_dim"
+        const val BG_BLUR = "bg_blur"
+        const val KEY_ALPHA = "key_alpha"
+        const val KEY_GAP = "key_gap"
+        const val HINT_SIZE = "hint_size"
+        const val LONG_PRESS_MS = "longpress_ms"
+        const val LEARN_UNDO = "learn_undo"
         const val LATEST_JSON = "update_latest_json"
         const val AUTO_UPDATE = "auto_update"
         const val UPDATE_NOTIFIED = "update_notified"
@@ -107,5 +168,13 @@ class Prefs(private val ctx: Context) {
             "https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json",
         )
         val STYLES = listOf("casual", "standard", "formal")
+        val SWATCHES = listOf("Blue" to "#1E88E5", "Teal" to "#00897B", "Green" to "#43A047", "Lime" to "#7CB342", "Amber" to "#FFB300",
+            "Orange" to "#FB8C00", "Red" to "#E53935", "Pink" to "#D81B60", "Purple" to "#8E24AA", "Indigo" to "#3949AB")
+        fun parseColor(s: String): Int? = runCatching {
+            val h = s.trim().removePrefix("#")
+            if (h.length != 6) null else (0xFF000000 or h.toLong(16)).toInt()
+        }.getOrNull()
+        /** the background image (already cropped / scaled down when picked) */
+        fun bgFile(ctx: Context) = java.io.File(ctx.filesDir, "kb_bg.jpg")
     }
 }

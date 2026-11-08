@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+        <Preference app:key="log_info" app:title="Local log" app:selectable="false" app:iconSpaceReserved="false" />
+        <Preference app:key="export" app:title="Export local data" app:summary="Share the event log as JSONL" app:iconSpaceReserved="false" />
+        <Preference app:key="clear" app:title="Clear local data" app:summary="Delete the event log on this phone" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="share_data" app:title="Share typing data to improve autocorrect" app:defaultValue="false"
+            app:summaryOff="Off. Nothing leaves this phone unless you turn this on."
+            app:summaryOn="On. New correction events are uploaded about every 6 hours." app:iconSpaceReserved="false" />
+        <Preference app:key="share_info" app:title="What gets sent" app:selectable="false" app:iconSpaceReserved="false"
+            app:summary="Sharing is opt-in and off until you switch it on. Only events logged after you switch it on are sent, about every 6 hours (on Wi-Fi only unless you change that).\n\nFor each word the keyboard corrected: the word as you typed it, where your finger touched each key, up to 120 characters of text before it (and the next few words for to/too-style fixes), the suggestions it considered, what it picked and whether you kept it, plus the style, model and app version. For words it left alone: only timing numbers, no text.\n\nNothing typed in password, incognito, email, web address, number, phone or date fields is ever recorded, so it can never be sent.\n\nUploads carry a random ID made by this app, not your name, account or phone ID. The server doesn’t store IP addresses. It’s used only to improve this autocorrect." />
+        <SwitchPreferenceCompat app:key="upload_wifi_only" app:title="Upload on Wi-Fi only" app:defaultValue="true" app:dependency="share_data" app:iconSpaceReserved="false" />
+        <EditTextPreference app:key="upload_url" app:title="Upload server URL" app:dependency="share_data" app:iconSpaceReserved="false" />
+        <Preference app:key="delete_uploaded" app:title="Delete my uploaded data"
+            app:summary="Remove everything this phone has sent from the server, clear the local log and personal dictionary, and start over with a new random ID" app:iconSpaceReserved="false" />
+
+</PreferenceScreen>

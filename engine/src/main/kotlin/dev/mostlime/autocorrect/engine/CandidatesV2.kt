@@ -24,7 +24,7 @@ class CandidateGeneratorV2(
     val minSplit: Int = 3,
     val maxSplit: Int = 24,
     val maxSplit3: Int = 14,
-    val spaceBarX: DoubleArray = doubleArrayOf(3.5, 8.5),
+    var spaceBarX: DoubleArray = doubleArrayOf(3.5, 8.5),
 ) {
     val lex = gen.lex
     val sp = gen.sp

@@ -2,6 +2,7 @@ package dev.mostlime.autocorrect
 
 import dev.mostlime.autocorrect.ime.KeyType
 import dev.mostlime.autocorrect.ime.KeyboardLayout
+import dev.mostlime.autocorrect.ime.LayoutOptions
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,6 +27,30 @@ class LayoutTest {
         assertTrue(KeyboardLayout.alternates(k("a")) == listOf("@", "à", "á", "â", "ä", "æ", "ã", "å", "ā"))
         // every letter has a one-character hint (the default when released without sliding)
         for (c in 'a'..'z') assertTrue("$c", KeyboardLayout.alternates(k(c.toString())).firstOrNull()?.length == 1)
+    }
+
+    @Test fun everyLayoutHasAllLettersInsideTheKeyboard() {
+        for (d in KeyboardLayout.LAYOUTS) for (o in listOf(LayoutOptions(d.id), LayoutOptions(d.id, numberRow = true, emojiKey = true, arrows = true))) {
+            val l = KeyboardLayout.letters(o)
+            val c = KeyboardLayout.centers(l)
+            assertTrue("${d.id}: ${('a'..'z').filter { it !in c }}", ('a'..'z').all { it in c })
+            assertTrue(d.id, l.keys.all { it.x >= 0f && it.x + it.w <= 10.001f })
+            val bar = KeyboardLayout.spaceBar(l)
+            assertTrue(bar[1] > bar[0] + 2)
+        }
+        // QWERTY keeps the trained geometry: q at (0.5, 0.7), a at (1.0, 2.1), z at (2.0, 3.5)
+        val q = KeyboardLayout.centers(KeyboardLayout.LETTERS)
+        assertTrue(q['q'] == (0.5 to 0.7) && q['a'] == (1.0 to 2.1) && kotlin.math.abs(q['z']!!.second - 3.5) < 1e-9 && q['z']!!.first == 2.0)
+    }
+
+    @Test fun customLongPressEntries() {
+        val m = KeyboardLayout.parseExtra("e: € :) ✓\nnot a line\nh: haha")
+        assertTrue(m["e"] == listOf("€", ":)", "✓") && m["h"] == listOf("haha"))
+        KeyboardLayout.extra = m
+        val e = KeyboardLayout.LETTERS.keys.first { it.text == "e" }
+        assertTrue(KeyboardLayout.alternates(e).takeLast(3) == listOf("€", ":)", "✓"))
+        KeyboardLayout.extra = emptyMap()
+        assertTrue("/" in KeyboardLayout.alternates(KeyboardLayout.LETTERS.keys.first { it.text == "." }))
     }
 
     @Test fun numberRowKeepsLetterTouchesInModelUnits() {

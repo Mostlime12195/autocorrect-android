@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+    <PreferenceCategory app:title="Theme" app:iconSpaceReserved="false">
+        <ListPreference app:key="theme_mode" app:title="Theme" app:defaultValue="system" app:entries="@array/theme_modes" app:entryValues="@array/theme_modes_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <ListPreference app:key="theme_color" app:title="Theme color" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <Preference app:key="custom_color" app:title="Custom color" app:summary="Pick any color" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Background" app:iconSpaceReserved="false">
+        <Preference app:key="kb_bg" app:title="Keyboard background" app:summary="Pick an image" app:iconSpaceReserved="false" />
+        <Preference app:key="kb_bg_remove" app:title="Remove background" app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="bg_dim" app:title="Darken (%)" app:defaultValue="30" android:max="80" app:min="0" app:seekBarIncrement="5" app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="bg_blur" app:title="Blur" app:defaultValue="0" android:max="25" app:min="0" app:seekBarIncrement="1" app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="key_alpha" app:title="Key opacity over the image (%)" app:defaultValue="75" android:max="100" app:min="20" app:seekBarIncrement="5" app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Keys" app:iconSpaceReserved="false">
+        <SeekBarPreference app:key="kb_height" app:title="Keyboard height (%)" app:defaultValue="108" android:max="130" app:min="80" app:seekBarIncrement="5" app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="key_gap" app:title="Key gap (dp)" app:defaultValue="3" android:max="8" app:min="1" app:seekBarIncrement="1" app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="key_radius" app:title="Key corner radius (dp)" app:defaultValue="9" android:max="20" app:min="0" app:seekBarIncrement="1" app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="show_hints" app:title="Show hint symbols" app:defaultValue="true" app:summary="The long-press symbol in the corner of each key" app:iconSpaceReserved="false" />
+        <ListPreference app:key="hint_size" app:title="Hint size" app:defaultValue="normal" app:entries="@array/hint_sizes" app:entryValues="@array/hint_sizes_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Layout" app:iconSpaceReserved="false">
+        <EditTextPreference app:key="custom_longpress" app:title="Custom long-press" app:dialogMessage="One key per line: the key, a colon, then entries separated by spaces. Entries can be several characters. Example:&#10;e: € ✓&#10;h: :) haha" app:iconSpaceReserved="false" />
+        <ListPreference app:key="kb_layout" app:title="Layout" app:defaultValue="qwerty" app:entries="@array/layouts" app:entryValues="@array/layouts_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="number_row" app:title="Number row" app:defaultValue="false"
+            app:summary="Always show 1 – 0 above the letters" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="comma_key" app:title="Comma key" app:defaultValue="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="emoji_key" app:title="Emoji key" app:defaultValue="false" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="arrow_row" app:title="Cursor keys" app:defaultValue="false" app:summary="A row of arrow keys under the space bar" app:iconSpaceReserved="false" />
+        <ListPreference app:key="one_handed" app:title="One-handed mode" app:defaultValue="off" app:entries="@array/one_handed" app:entryValues="@array/one_handed_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="split_landscape" app:title="Split keyboard in landscape" app:defaultValue="false" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

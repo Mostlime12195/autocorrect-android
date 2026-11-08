@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+        <SwitchPreferenceCompat app:key="auto_cap" app:title="Auto-capitalize" app:defaultValue="true"
+            app:summary="Capital letter at the start of a sentence (shift and corrections), when the text field allows it" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="swipe_typing" app:title="Swipe typing" app:defaultValue="true"
+            app:summary="Slide across the letters to type a word. The strip shows alternatives; backspace right after removes it." app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="longpress_ms" app:title="Long-press delay (ms)" app:defaultValue="380" android:max="800" app:min="200" app:seekBarIncrement="20" app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="haptics" app:title="Vibrate on key press" app:defaultValue="true" app:iconSpaceReserved="false" />
+        <ListPreference app:key="haptic_strength" app:title="Vibration strength" app:defaultValue="1" app:dependency="haptics"
+            app:entries="@array/haptic_strengths" app:entryValues="@array/haptic_strength_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="clipboard" app:title="Clipboard suggestions and history" app:defaultValue="true"
+            app:summary="Offer recently copied text and keep the last 10 copies on this phone. Never from password or sensitive clips." app:iconSpaceReserved="false" />
+
+</PreferenceScreen>

@@ -81,6 +81,9 @@ class UserData(private val dictFile: File?, private val learnFile: File?, privat
 
     @Synchronized fun clearWords() { words.clear(); saveDict() }
 
+    /** suppressions and undo counts gone, words kept */
+    @Synchronized fun clearLearned() { suppress.clear(); undos.clear(); saveLearn() }
+
     /**
      * Dictionary words near a typed word (same length +-2, edit distance <= 2), for the candidate list. Words with
      * characters the spatial model can't score (digits, hyphens) are only protected, never suggested.
