@@ -119,8 +119,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
-        // the user moved the cursor away from the word being composed: keep it as typed
-        if (composing.isNotEmpty() && (newSelStart != newSelEnd || candidatesEnd < 0 || newSelEnd != candidatesEnd)) {
+        // the user moved the cursor away from the word being composed: keep it as typed. Updates without a composing
+        // region (candidatesEnd < 0) are ignored: they can be stale ones from our own commit arriving after the next key.
+        if (composing.isNotEmpty() && candidatesEnd >= 0 && (newSelStart != newSelEnd || newSelEnd != candidatesEnd)) {
             currentInputConnection?.finishComposingText()
             resetWord()
             setStrip(emptyList(), -1, StripMode.NONE)
