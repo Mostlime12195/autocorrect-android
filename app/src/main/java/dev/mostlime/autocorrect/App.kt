@@ -1,6 +1,7 @@
 package dev.mostlime.autocorrect
 
 import android.app.Application
+import android.os.Build
 import android.os.Process
 import android.os.SystemClock
 import dev.mostlime.autocorrect.log.EventLog
@@ -21,7 +22,9 @@ class App : Application() {
         prefs = Prefs(this)
         store = ModelStore(this)
         events = EventLog(this)
-        UploadWorker.schedule(this, prefs)
+        // the keyboard runs in ":ime"; background work is scheduled from the app process only
+        val imeProcess = Build.VERSION.SDK_INT >= 28 && getProcessName().endsWith(":ime")
+        if (!imeProcess) UploadWorker.schedule(this, prefs)
     }
 
     companion object {

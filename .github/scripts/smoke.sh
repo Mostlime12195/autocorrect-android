@@ -47,6 +47,11 @@ PY
 while read X Y; do adb shell input tap $X $Y; sleep 0.4; done < smoke/taps.txt
 sleep 3
 adb exec-out screencap -p > smoke/typed.png
+# same keyboard with gesture navigation (3-button is the emulator default)
+adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural || true
+sleep 4
+adb exec-out screencap -p > smoke/gesture_nav.png
+adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton || true
 adb shell uiautomator dump /sdcard/ui.xml >/dev/null
 adb pull /sdcard/ui.xml smoke/ui1.xml >/dev/null
 TEXT=$(grep -o 'text="[^"]*" resource-id="dev.mostlime.autocorrect:id/try_it"' smoke/ui1.xml | sed 's/text="\([^"]*\)".*/\1/')

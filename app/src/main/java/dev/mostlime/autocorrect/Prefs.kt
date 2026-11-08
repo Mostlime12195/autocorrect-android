@@ -6,8 +6,18 @@ import androidx.preference.PreferenceManager
 import java.util.UUID
 
 /** Typed access to the settings (keys match res/xml/prefs.xml). */
-class Prefs(ctx: Context) {
-    val sp: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(ctx)
+class Prefs(private val ctx: Context) {
+    var sp: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(ctx)
+        private set
+
+    /**
+     * The keyboard runs in its own process (":ime") and settings are changed in the app process: re-read the file.
+     * (MODE_MULTI_PROCESS is deprecated but still reloads a changed file on the next getSharedPreferences.)
+     */
+    @Suppress("DEPRECATION")
+    fun reload() {
+        sp = ctx.getSharedPreferences(PreferenceManager.getDefaultSharedPreferencesName(ctx), Context.MODE_MULTI_PROCESS)
+    }
 
     var model: String
         get() = sp.getString(MODEL, "") ?: ""

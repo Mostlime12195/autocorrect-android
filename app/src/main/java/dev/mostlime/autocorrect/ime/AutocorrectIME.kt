@@ -122,6 +122,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     override fun onStartInputView(editorInfo: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(editorInfo, restarting)
+        app.prefs.reload()   // settings live in the app process
         info = editorInfo
         val policy = FieldPolicy.of(editorInfo)
         val v = kv
@@ -130,7 +131,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         v?.enterLabel = enterLabel(editorInfo)
         ctl.lettersLayer = v?.layer == KeyboardLayout.LETTERS
         ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME))
-        if (EngineHolder.scorer == null && !EngineHolder.loading) EngineHolder.preload(this)
+        // cheap when loaded; picks up a model / style change or a finished download
+        if (!EngineHolder.loading) EngineHolder.preload(this)
         updateStatus(null)
     }
 

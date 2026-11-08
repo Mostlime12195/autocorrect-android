@@ -108,8 +108,12 @@ class ModelStore(private val ctx: Context) {
     val dir = File(ctx.filesDir, "models").apply { mkdirs() }
     private val cached = File(dir, "manifest.json")
     @Volatile private var manifest: Manifest? = null
+    @Volatile private var loadedStamp = -1L
 
+    /** Cached manifest; re-read when the other process (app / keyboard) refreshed the file. */
     fun manifest(): Manifest {
+        val stamp = if (cached.exists()) cached.lastModified() else 0L
+        if (stamp != loadedStamp) { manifest = null; loadedStamp = stamp }
         manifest?.let { return it }
         val m = runCatching { if (cached.exists()) Manifest.parse(cached.readText()) else null }.getOrNull()
             ?: Manifest.parse(ctx.assets.open("manifest.json").bufferedReader().use { it.readText() })

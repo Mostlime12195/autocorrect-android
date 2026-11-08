@@ -10,7 +10,6 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import dev.mostlime.autocorrect.App
-import dev.mostlime.autocorrect.ime.EngineHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -31,7 +30,7 @@ class DownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 }
             }
             app.store.prune()
-            EngineHolder.reloadIfNeeded(app)
+            // the keyboard process picks the new model up at its next onStartInputView
             Result.success(workDataOf(KEY_MODEL to spec.id))
         } catch (e: Exception) {
             if (runAttemptCount < 3) Result.retry() else Result.failure(workDataOf(KEY_ERROR to (e.message ?: e.toString())))

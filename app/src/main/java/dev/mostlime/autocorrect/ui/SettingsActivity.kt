@@ -21,7 +21,6 @@ import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.BuildConfig
 import dev.mostlime.autocorrect.Prefs
 import dev.mostlime.autocorrect.R
-import dev.mostlime.autocorrect.ime.EngineHolder
 import dev.mostlime.autocorrect.log.UploadWorker
 import dev.mostlime.autocorrect.model.DownloadWorker
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +52,6 @@ class SettingsActivity : AppCompatActivity() {
                 setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
             }
             findPreference<Preference>(Prefs.BATTERY_SAVER)!!.setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
-            findPreference<Preference>(Prefs.STYLE)!!.setOnPreferenceChangeListener { _, _ -> view?.post { EngineHolder.reloadIfNeeded(app) }; true }
             findPreference<Preference>("enable_keyboard")!!.setOnPreferenceClickListener {
                 startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)); true
             }
@@ -107,7 +105,7 @@ class SettingsActivity : AppCompatActivity() {
 
         private fun onModelChanged() {
             val spec = app.store.activeSpec()
-            if (!app.store.isInstalled(spec)) DownloadWorker.start(requireContext(), spec.id) else EngineHolder.reloadIfNeeded(app)
+            if (!app.store.isInstalled(spec)) DownloadWorker.start(requireContext(), spec.id)
             refresh()
         }
 
@@ -136,19 +134,13 @@ class SettingsActivity : AppCompatActivity() {
             val spec = app.store.activeSpec()
             val st = findPreference<Preference>("model_status")
             if (app.store.isInstalled(spec)) {
-                st?.summary = "${spec.label}: installed (${spec.downloadBytes / 1_000_000} MB)" +
-                    (if (EngineHolder.spec?.id == spec.id) ", loaded" else "") + (EngineHolder.lastError?.let { " · error: $it" } ?: "")
+                st?.summary = "${spec.label}: installed (${spec.downloadBytes / 1_000_000} MB)"
             } else if (st?.summary?.startsWith("Downloading") != true) {
                 st?.summary = "${spec.label}: not downloaded (${spec.downloadBytes / 1_000_000} MB). Tap to download."
             }
-            val c = EngineHolder.corrector?.stats
-            findPreference<Preference>("stats")?.summary = buildString {
-                if (c != null && c.words > 0) {
-                    append("${c.words} words this session · LM skipped ${100 * c.lmSkipped / c.words}% · cheap path ${c.cheapOnly}")
-                    if (c.lmRuns > 0) append(" · avg LM ${(c.lmMsTotal / c.lmRuns).toInt()} ms")
-                    append("\n")
-                }
-                append("Session load ${EngineHolder.sessionMs} ms · cold load ${EngineHolder.coldLoadMs} ms · first inference ${EngineHolder.firstInferenceMs.toInt()} ms")
+            lifecycleScope.launch {
+                val st = withContext(Dispatchers.IO) { LogStats.compute(app.events.file) }
+                findPreference<Preference>("stats")?.summary = st
             }
             lifecycleScope.launch {
                 val (n, bytes) = withContext(Dispatchers.IO) { app.events.count() to app.events.sizeBytes() }
