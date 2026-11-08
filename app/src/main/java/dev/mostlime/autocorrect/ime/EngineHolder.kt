@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.RandomAccessFile
 import java.nio.channels.FileChannel
 import java.util.concurrent.Executors
@@ -61,10 +62,14 @@ object EngineHolder {
     @Volatile var lastScored = 0
     private var firstLoadDone = false
 
-    /** Async, idempotent: lexicon, then the active model's session. */
+    /** Session creation runs here, not on the engine thread, so the cheap path keeps working while a model loads. */
+    private val loaderScope = CoroutineScope(SupervisorJob() + Executors.newSingleThreadExecutor { r -> Thread(r, "ac-loader") }.asCoroutineDispatcher())
+
+    /** Async, idempotent: lexicon (engine thread), then the active model's session (loader thread). */
     fun preload(ctx: Context) {
         val app = ctx.applicationContext as App
-        scope.launch { ensureLoaded(app) }
+        scope.launch { ensureLexicon(app) }
+        loaderScope.launch { ensureLoaded(app) }
     }
 
     /** Engine thread: the lexicon + candidate generators (needed by the cheap path too). */
@@ -81,31 +86,32 @@ object EngineHolder {
         return corrector!!
     }
 
-    /** Engine thread: lexicon, then the active model's session (no-op when it is already loaded). */
-    fun ensureLoaded(app: App) {
-        ensureLexicon(app)
+    /** Loader thread: the active model's session (no-op when it is already loaded). Swapped in on the engine thread. */
+    private suspend fun ensureLoaded(app: App) {
         val want = runCatching { app.store.activeSpec() }.getOrNull() ?: return
         val cur = spec
         if (cur != null && cur.id == want.id && cur.graph.sha256 == want.graph.sha256 && scorer?.step?.closed == false) {
-            applyStyle(app); return
+            withContext(dispatcher) { applyStyle(app) }; return
         }
         if (!app.store.isInstalled(want)) return
         loading = true
         try {
-            release()
             val t0 = App.now()
             val tok = SPTokenizer.fromJson(app.store.file(want.vocab).readText())
             val f = app.store.file(want.graph)
             val buf = RandomAccessFile(f, "r").use { it.channel.map(FileChannel.MapMode.READ_ONLY, 0, it.length()) }
             val step = StepModel.open(OrtEnvironment.getEnvironment(), buf, want.meta, threads = 2,
                 ortFormat = want.format == "ort", extraConfig = want.sessionConfig)
-            scorer = NeuralScorer(tok, step)
-            spec = want
-            sessionMs = App.now() - t0
-            if (!firstLoadDone) { coldLoadMs = App.now() - App.processStart; firstLoadDone = true }
-            firstInferenceMs = -1.0
-            lastError = null
-            applyStyle(app)
+            withContext(dispatcher) {
+                release()
+                scorer = NeuralScorer(tok, step)
+                spec = want
+                sessionMs = App.now() - t0
+                if (!firstLoadDone) { coldLoadMs = App.now() - App.processStart; firstLoadDone = true }
+                firstInferenceMs = -1.0
+                lastError = null
+                applyStyle(app)
+            }
             Log.i(TAG, "session ${want.id} ready in $sessionMs ms (cold load $coldLoadMs ms since process start)")
         } catch (e: Throwable) {
             lastError = e.toString()

@@ -50,7 +50,8 @@ class OrtParityTest {
             wsame += got.zip(exp[i]).count { (a, b) -> a == b }
         }
         println("lm_block4 .ort vs Python int8: $same/${msgs.size} messages, $wsame/$words words identical, ${(System.nanoTime() - t0) / 1e9}s")
-        assertTrue(words - wsame <= 2, "too many word differences: ${words - wsame}")
+        // int8 dynamic-quant kernels differ between CPUs (x86 VNNI vs ARM dotprod): near-ties may flip; allow 1%
+        assertTrue((words - wsame) * 100 <= words, "too many word differences: ${words - wsame}/$words")
         step.close()
     }
 
