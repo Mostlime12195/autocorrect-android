@@ -73,9 +73,15 @@ class SettingsActivity : AppCompatActivity() {
                 view?.post { UploadWorker.schedule(requireContext(), app.prefs) }
                 true
             }
+            val confident = findPreference<Preference>(Prefs.CONFIDENT_ONLY)!!
+            confident.isEnabled = !app.prefs.suggestOnly
+            findPreference<Preference>(Prefs.CORRECTION_MODE)!!.setOnPreferenceChangeListener { _, v -> confident.isEnabled = v != "suggest"; true }
+            findPreference<Preference>("dictionary")!!.setOnPreferenceClickListener {
+                startActivity(Intent(requireContext(), DictionaryActivity::class.java)); true
+            }
             findPreference<Preference>("delete_uploaded")!!.setOnPreferenceClickListener {
                 MaterialAlertDialogBuilder(requireContext()).setTitle("Delete your uploaded data?")
-                    .setMessage("Deletes everything this phone has uploaded from the server and clears the log on this phone. " +
+                    .setMessage("Deletes everything this phone has uploaded from the server and clears the log and personal dictionary on this phone. " +
                         "If sharing stays on, future uploads use a new random ID that isn't linked to the old data.")
                     .setPositiveButton("Delete") { _, _ ->
                         lifecycleScope.launch {
@@ -167,6 +173,12 @@ class SettingsActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 val st = withContext(Dispatchers.IO) { LogStats.compute(app.events.file, BuildConfig.VERSION_NAME, app.prefs.statsResetAt) }
                 findPreference<Preference>("stats")?.summary = st
+            }
+            app.user.reloadIfChanged()
+            findPreference<Preference>("dictionary")?.summary = when (val n = app.user.size) {
+                0 -> "Words that are never corrected or flagged"
+                1 -> "1 word"
+                else -> "$n words"
             }
             lifecycleScope.launch {
                 val (n, bytes) = withContext(Dispatchers.IO) { app.events.count() to app.events.sizeBytes() }

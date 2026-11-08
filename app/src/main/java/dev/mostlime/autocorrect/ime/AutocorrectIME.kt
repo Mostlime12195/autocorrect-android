@@ -9,6 +9,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
 import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.BuildConfig
 import dev.mostlime.autocorrect.engine.DecodeParams
@@ -53,6 +54,21 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                 if (end - n >= 0 && c.setComposingRegion(end - n, end)) { c.commitText(text, 1); return }
             }
             c.deleteSurroundingText(n, 0); c.commitText(text, 1)
+        }
+        /** a likely typo: SuggestionSpan (misspelled + easy-correct) so apps that support it underline it with a fix menu */
+        override fun replaceBefore(n: Int, text: String, mark: TypoMark?) {
+            if (mark == null) { replaceBefore(n, text); return }
+            val ss = android.text.SpannableString(text)
+            val span = android.text.style.SuggestionSpan(this@AutocorrectIME, mark.suggestions.take(5).toTypedArray(),
+                android.text.style.SuggestionSpan.FLAG_MISSPELLED or android.text.style.SuggestionSpan.FLAG_EASY_CORRECT)
+            ss.setSpan(span, mark.start, mark.start + mark.len, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val c = ic ?: return
+            val et = c.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)
+            if (et != null && et.selectionStart == et.selectionEnd && et.selectionStart >= 0) {
+                val end = et.startOffset + et.selectionStart
+                if (end - n >= 0 && c.setComposingRegion(end - n, end)) { c.commitText(ss, 1); return }
+            }
+            c.deleteSurroundingText(n, 0); c.commitText(ss, 1)
         }
         override fun beginBatch() { ic?.beginBatchEdit() }
         override fun endBatch() { ic?.endBatchEdit() }
@@ -106,7 +122,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
             EngineHolder.scope.launch {
                 val sc = EngineHolder.scorer?.takeIf { !it.step.closed }
                 val ch = if (sc == null) emptyList() else runCatching {
-                    Rewind.check(targets, sc, (EngineHolder.params ?: DEFAULT_PARAMS).lamRe, Rewind.MARGIN)
+                    Rewind.check(targets, sc, (EngineHolder.params ?: DEFAULT_PARAMS).lamRe, Rewind.MARGIN, app.user)
                 }.getOrDefault(emptyList())
                 main.post { done(ch) }
             }
@@ -118,8 +134,25 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         }
     }
 
+    /** personal dictionary + learned edits (files shared with the settings screen) */
+    private val learning = object : Learning {
+        override fun isUserWord(w: String) = app.user.has(w)
+        override fun inVocab(w: String): Boolean {
+            // unknown until the lexicon is loaded: count as in-vocab, so nothing is learned as spelling
+            val lex = EngineHolder.corrector?.lex ?: return true
+            return lex.index.containsKey(w.lowercase()) || app.user.has(w)
+        }
+        override fun addWord(w: String) = app.user.add(w)
+        override fun removeWord(w: String) = app.user.remove(w)
+        override fun suppress(typed: String, chosen: String) = app.user.suppress(typed, chosen)
+        override fun penalty(typed: String, chosen: String) = app.user.penalty(typed, chosen)
+        override fun noteSpellingUndo(typed: String) = app.user.noteSpellingUndo(typed)
+    }
+
     private val ui = object : ControllerUi {
         override fun showStrip(words: List<String>, bold: Int, undo: Int) { kv?.setSuggestions(words, bold, undo) }
+        override fun showStrip(words: List<String>, bold: Int, undo: Int, hint: String, action: String?) { kv?.setSuggestions(words, bold, undo, hint, action) }
+        override fun onDictAdded(word: String) { Toast.makeText(this@AutocorrectIME, "Added “$word” to dictionary", Toast.LENGTH_SHORT).show() }
         override fun onApplied() { kv?.flash() }
         override fun setShift(shift: Shift) { kv?.shift = shift }
         override fun onResult(r: WordResult?) {
@@ -190,7 +223,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     override fun onCreate() {
         super.onCreate()
         app = application as App
-        ctl = KeyboardController({ currentInputConnection?.let { editor } }, engine, ui, timer) { e ->
+        ctl = KeyboardController({ currentInputConnection?.let { editor } }, engine, ui, timer, learning) { e ->
             app.events.append(toJson(e) as JsonObject)
         }
         EngineHolder.preload(this)
@@ -222,7 +255,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         v?.layer = if (policy.numeric) KeyboardLayout.SYMBOLS else letters()
         v?.enterLabel = enterLabel(editorInfo)
         ctl.lettersLayer = v?.layer?.isLetters == true
-        ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME, rewind = app.prefs.rewind))
+        app.user.reloadIfChanged()   // the settings screen may have edited the dictionary
+        ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME,
+            rewind = app.prefs.rewind, suggestOnly = app.prefs.suggestOnly, confidentOnly = app.prefs.confidentOnly))
         root?.hidePanel()
         if (!app.prefs.clipboard) clips.clear()
         updateClipChip()
@@ -273,6 +308,10 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onSuggestion(index: Int) = ctl.pickSuggestion(index)
+
+    override fun onSuggestionLongPress(index: Int) = ctl.longPressSuggestion(index)
+
+    override fun onStripAction() = ctl.stripAction()
 
     override fun onAlternate(text: String) = ctl.replaceLastChar(text)
 

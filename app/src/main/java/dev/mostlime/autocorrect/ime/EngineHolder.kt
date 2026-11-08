@@ -85,7 +85,7 @@ object EngineHolder {
             val miss = runCatching {
                 app.assets.open("misspellings.tsv").bufferedReader().readLines().mapNotNull { l -> l.split('\t').takeIf { it.size >= 2 }?.let { it[0] to it[1] } }.toMap()
             }.getOrDefault(emptyMap())
-            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = SPACE_BAR_X), misspellings = miss)
+            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = SPACE_BAR_X), misspellings = miss, user = app.user)
             lexiconMs = App.now() - t0
             Log.i(TAG, "lexicon ${lex.size} words in $lexiconMs ms")
         }

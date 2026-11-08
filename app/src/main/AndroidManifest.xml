@@ -26,6 +26,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.DictionaryActivity"
+            android:exported="false"
+            android:label="Personal dictionary"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".ime.AutocorrectIME"
             android:exported="true"

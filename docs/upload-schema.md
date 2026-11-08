@@ -74,6 +74,18 @@ Every event has `v` (event schema, 1), `ts` (ms since epoch, phone clock) and `t
 `right_context` (the words typed after it), `outcome` (`accepted`, or a second line with the same `id` and `undone` when
 the undo chip put it back), `style, model, app_version`.
 
+### `not_typo`: "not a typo" on a flagged word (suggest-only / unsure mode); the word joined the personal dictionary
+
+`id, typed, left_context` (≤120 chars), `candidates` (`[{w}]`, the top 3 fixes shown), `style, model, app_version`.
+
+### `suppress`: an edit the user undid or ignored that isn't a spelling fix (made harder for 7 days, never learned as a word)
+
+`id, typed, chosen, source` (`undo`, `ignore`, `rewind`), `left_context` (when known), `style, model, app_version`.
+
+Flagged words are logged as `autocorrect` events with `outcome: "flagged"`, `final` = the word as typed, `flag`
+(`suggest` or `unsure`) and `flag_kind` (`spelling` / `other`); a later tap on a fix logs the same `id` again with
+`outcome: "strip_pick"`.
+
 ### `session`: model load timings (no text), once per session load, after its first LM inference
 
 `model, session_ms` (ORT session creation), `cold_load_ms` (process start → session ready), `lexicon_ms`,

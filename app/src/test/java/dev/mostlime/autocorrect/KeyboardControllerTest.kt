@@ -26,6 +26,7 @@ import dev.mostlime.autocorrect.ime.KeyboardController
 import dev.mostlime.autocorrect.ime.KeyboardLayout
 import dev.mostlime.autocorrect.ime.Shift
 import dev.mostlime.autocorrect.ime.Timer
+import dev.mostlime.autocorrect.ime.TypoMark
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -59,7 +60,15 @@ class KeyboardControllerTest {
         override fun deleteBefore(n: Int) {
             this.text.setLength(maxOf(0, this.text.length - n))
             if (cs > this.text.length) cs = -1
+            marks.keys.removeAll { it >= this.text.length }
             shown()
+        }
+        /** typo marks (SuggestionSpans in the app): start in the text -> suggestions */
+        val marks = HashMap<Int, List<String>>()
+        override fun replaceBefore(n: Int, text: String, mark: TypoMark?) {
+            val start = this.text.length - n
+            replaceBefore(n, text)
+            if (mark != null) marks[start + mark.start] = mark.suggestions
         }
         override fun beginBatch() { depth++ }
         override fun endBatch() { depth--; shown() }

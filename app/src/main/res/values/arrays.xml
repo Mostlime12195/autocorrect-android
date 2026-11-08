@@ -10,6 +10,14 @@
         <item>standard</item>
         <item>formal</item>
     </string-array>
+    <string-array name="correction_modes">
+        <item>Auto-correct</item>
+        <item>Suggest only (never edit my text)</item>
+    </string-array>
+    <string-array name="correction_mode_values">
+        <item>auto</item>
+        <item>suggest</item>
+    </string-array>
     <string-array name="haptic_strengths">
         <item>Light</item>
         <item>Medium</item>

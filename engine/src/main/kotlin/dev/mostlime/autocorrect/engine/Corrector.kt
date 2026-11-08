@@ -125,6 +125,8 @@ class Corrector(
     var config: CorrectorConfig = CorrectorConfig(),
     /** known misspellings (lowercase) -> their correction */
     var misspellings: Map<String, String> = emptyMap(),
+    /** personal dictionary + learned suppressions (null = none) */
+    var user: UserData? = null,
 ) {
     private fun typedBias(s: Slot, bias: Double) =
         if (config.misspellingPenalty != 0.0 && s.typed.lowercase() in misspellings) bias - config.misspellingPenalty else bias
@@ -137,7 +139,15 @@ class Corrector(
         var t = touches?.takeIf { it.size == typed.length } ?: KeyGeom.keyTouches(typed)
         if (t.isEmpty()) t = KeyGeom.keyTouches("a")
         val c = gen2?.generate(t, typed) ?: gen.generate(t, typed)
-        return Slot.of(typed, c)
+        val near = user?.near(typed).orEmpty()
+        if (near.isEmpty()) return Slot.of(typed, c)
+        // personal dictionary words close to the typed string: spelling-model cost like any lexicon word + a small prior
+        val have = c.mapTo(HashSet()) { it.text.lowercase() }
+        val emit = gen.sp.emitTable(t)
+        val extra = near.mapNotNull { w ->
+            if (w.lowercase() in have) null else gen.sp.wordCode(w.lowercase())?.let { Cand(w, gen.sp.score(emit, it), Kind.WORD, UserData.WORD_LOGP) }
+        }
+        return Slot.of(typed, c + extra)
     }
 
     private fun cheapScore(s: Slot, i: Int): Double {
@@ -211,6 +221,9 @@ class Corrector(
         if (!allowChange || full.typedIdx < 0 && full.cands.isEmpty()) {
             return keep(full, t0)
         }
+        // personal dictionary words are never corrected
+        val u = user
+        if (u != null && u.has(full.typed)) return keep(full, t0)
         if (scorer == null) {
             stats.cheapOnly++
             val sc = DoubleArray(full.cands.size) { cheapScore(full, it) + if (it == full.typedIdx) typedBias(full, config.cheapKeepBias) else 0.0 }
@@ -229,7 +242,12 @@ class Corrector(
         }
         val s = full.subset(lmSubset(full))
         val lp = scorer.score(s.cands.map { LmReq(left, sep + it) })
-        val (k, sc) = choose(s, lp, p.lam, typedBias(s, p.bias), p.pen)
+        var (k, sc) = choose(s, lp, p.lam, typedBias(s, p.bias), p.pen)
+        // an edit the user undid recently needs SUPPRESS_NATS more
+        if (u != null && k != s.typedIdx) {
+            val pen = u.penalty(s.typed, s.cands[k])
+            if (pen > 0) { sc[k] -= pen; k = sc.indices.maxBy { sc[it] } }
+        }
         var recheck: Recheck? = null
         var mergeOut: Merge? = null
         val prevConfident = prev != null && prev.margin >= config.recheckSkipMargin &&
@@ -246,7 +264,9 @@ class Corrector(
             val sc2 = DoubleArray(prev.slot.cands.size) { Double.NEGATIVE_INFINITY }
             keep.forEachIndexed { j, i -> sc2[i] = sc2s[j] }
             val k2 = keep[k2s]
-            if (cur0 >= 0 && k2 != prev.idx && sc2[k2] - sc2[prev.idx] > p.margin) recheck = Recheck(prev.slot.cands[prev.idx], prev.slot.cands[k2], k2)
+            val prevCur = prev.slot.cands[prev.idx]
+            val rePen = if (u == null || k2 == prev.idx) 0.0 else if (u.has(prevCur)) Double.POSITIVE_INFINITY else u.penalty(prevCur, prev.slot.cands[k2])
+            if (cur0 >= 0 && k2 != prev.idx && sc2[k2] - sc2[prev.idx] > p.margin + rePen) recheck = Recheck(prev.slot.cands[prev.idx], prev.slot.cands[k2], k2)
             // C. merge of the previous token and this one (only across a single space)
             val g2 = gen2
             if (merge != null && g2 != null && sep == " " && g2.mergeOk(merge.input.prevTyped, merge.typed)) {
@@ -275,7 +295,8 @@ class Corrector(
             if (isLower(out.take(1)) && (sentStart(left + sep) || out.split(' ')[0] in I_WORDS)) {
                 val lc = scorer.score(listOf(LmReq(left, sep + cap1(out))))[0]
                 val kd = s.kind(k)
-                val v = s.sp[k] + p.lam * lc + (if (k == s.typedIdx) p.bias else 0.0) - (if (kd != Kind.WORD) p.pen[kd] ?: 0.0 else 0.0) - (p.pen["caps"] ?: 0.0)
+                val v = s.sp[k] + p.lam * lc + (if (k == s.typedIdx) p.bias else 0.0) - (if (kd != Kind.WORD) p.pen[kd] ?: 0.0 else 0.0) - (p.pen["caps"] ?: 0.0) -
+                    (u?.penalty(out, cap1(out)) ?: 0.0)
                 if (v > sc[k]) out = cap1(out)
             }
             // D. punctuation after the previous word
@@ -288,7 +309,10 @@ class Corrector(
                     val lpp = scorer.score(reqs)
                     var best = p.lamRe * lpp[0]
                     var bj = -1
-                    PUNCT.forEachIndexed { j, (_, kind) -> val v = p.lamRe * lpp[1 + j] - (p.pen[kind] ?: 0.0); if (v > best) { best = v; bj = j } }
+                    PUNCT.forEachIndexed { j, (pc, kind) ->
+                        val v = p.lamRe * lpp[1 + j] - (p.pen[kind] ?: 0.0) - (u?.penalty(po, po + pc) ?: 0.0)
+                        if (v > best) { best = v; bj = j }
+                    }
                     if (bj >= 0) {
                         val pc = PUNCT[bj].first
                         prevText = po + pc
@@ -362,9 +386,10 @@ object Rewind {
 
     fun isTarget(word: String) = word.lowercase() in SETS
 
-    fun check(targets: List<RewindTarget>, scorer: LmScorer, lam: Double, margin: Double = MARGIN): List<RewindChange> {
+    fun check(targets: List<RewindTarget>, scorer: LmScorer, lam: Double, margin: Double = MARGIN, user: UserData? = null): List<RewindChange> {
         val out = ArrayList<RewindChange>()
         for (t in targets) {
+            if (user != null && user.has(t.word)) continue
             val group = SETS[t.word.lowercase()] ?: continue
             val cands = group.map { applyCase(it, t.word) }
             val cur = group.indexOf(t.word.lowercase())
@@ -372,7 +397,7 @@ object Rewind {
             var best = cur
             for (i in lp.indices) if (lp[i] > lp[best]) best = i
             val m = lam * (lp[best] - lp[cur])
-            if (best != cur && m >= margin) out.add(RewindChange(t.start, t.word, cands[best], m, t.wordsBack))
+            if (best != cur && m >= margin + (user?.penalty(t.word, cands[best]) ?: 0.0)) out.add(RewindChange(t.start, t.word, cands[best], m, t.wordsBack))
         }
         return out
     }

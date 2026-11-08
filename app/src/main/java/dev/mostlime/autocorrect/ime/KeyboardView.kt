@@ -57,6 +57,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         fun onKey(key: KeyDef, touch: Touch)
         fun onAlternate(text: String)
         fun onSuggestion(index: Int)
+        fun onSuggestionLongPress(index: Int) {}
+        /** the strip's action chip ("not a typo", "ignore", "undo") */
+        fun onStripAction() {}
         fun onSwitchIme()
         fun onSettings()
         fun onClipboard() {}
@@ -129,9 +132,23 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     var status: String = ""
         set(v) { field = v; invalidate() }
 
-    fun setSuggestions(s: List<String>, boldIndex: Int, undoIndex: Int = -1) {
-        if (s != suggestions) stripChangedAt = SystemClock.uptimeMillis()
-        suggestions = s.take(3); bold = boldIndex; undoIdx = undoIndex; invalidate()
+    private var stripHint = ""
+    private var stripAction: String? = null
+    private val actionRect = RectF()
+
+    fun setSuggestions(s: List<String>, boldIndex: Int, undoIndex: Int = -1, hint: String = "", action: String? = null) {
+        if (s != suggestions || action != stripAction) stripChangedAt = SystemClock.uptimeMillis()
+        suggestions = s.take(3); bold = boldIndex; undoIdx = undoIndex; stripHint = hint; stripAction = action; invalidate()
+    }
+
+    /** width of the strip's word cells (the action chip, if any, takes the right end) */
+    private fun cellsW(): Float = if (stripAction != null && suggestions.isNotEmpty()) actionLeft() else width.toFloat()
+    private fun actionLeft(): Float {
+        val a = stripAction ?: return width.toFloat()
+        stripPaint.textSize = 14 * dp
+        val w = stripPaint.measureText(a) + 28 * dp
+        stripPaint.textSize = 17 * dp
+        return width - w - 8 * dp
     }
 
     /** a correction was applied: short flash of the strip */
@@ -184,6 +201,14 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     }
     private var symDownAt = 0L
     private var stripDown = -1f
+    /** long-press on a strip word (add to dictionary / not a typo): the release then does nothing */
+    private var stripLongDone = false
+    private val stripLongPress = Runnable {
+        val x = stripDown
+        if (x < 0 || suggestions.isEmpty() || (!actionRect.isEmpty && x >= actionRect.left - 4 * dp)) return@Runnable
+        val si = intArrayOf(1, 0, 2)[(x / (cellsW() / 3f)).toInt().coerceIn(0, 2)]
+        if (si < suggestions.size) { stripLongDone = true; buzz(strong = true); listener.onSuggestionLongPress(si) }
+    }
 
     // long-press alternates
     private class Alts(val key: KeyDef, val pointer: Int, val options: List<String>, var sel: Int)
@@ -307,8 +332,26 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             keyPaint.alpha = 255
             anim = true
         }
-        val cellW = width / 3f
+        val cellW = cellsW() / 3f
         val order = intArrayOf(1, 0, 2)   // best suggestion in the middle
+        actionRect.setEmpty()
+        val action = stripAction
+        if (action != null && suggestions.isNotEmpty()) {
+            // action chip at the right end ("not a typo", "ignore", "undo")
+            val l = actionLeft()
+            actionRect.set(l, 9 * dp, width - 8 * dp, stripH - 9 * dp)
+            keyPaint.color = pal.accentSoft
+            canvas.drawRoundRect(actionRect, actionRect.height() / 2, actionRect.height() / 2, keyPaint)
+            stripPaint.typeface = Typeface.DEFAULT; stripPaint.color = pal.fg; stripPaint.textSize = 14 * dp
+            canvas.drawText(action, actionRect.centerX(), actionRect.centerY() + 5 * dp, stripPaint)
+            stripPaint.textSize = 17 * dp
+        }
+        if (stripHint.isNotEmpty() && suggestions.isNotEmpty()) {
+            // small label in the top-left corner ("typo?")
+            statusPaint.textAlign = Paint.Align.LEFT; statusPaint.color = pal.accent
+            canvas.drawText(stripHint, 6 * dp, 12 * dp, statusPaint)
+            statusPaint.textAlign = Paint.Align.RIGHT; statusPaint.color = pal.dim
+        }
         val t = ((now - stripChangedAt) / 140f).coerceIn(0f, 1f)
         if (t < 1f) anim = true
         chipRect.setEmpty()
@@ -370,6 +413,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         if (suggestions.size > 1) {
             keyPaint.color = pal.mod
             for (c in 1..2) canvas.drawRect(cellW * c - dp / 2, 15 * dp, cellW * c + dp / 2, stripH - 15 * dp, keyPaint)
+            if (!actionRect.isEmpty) canvas.drawRect(cellW * 3 - dp / 2, 15 * dp, cellW * 3 + dp / 2, stripH - 15 * dp, keyPaint)
         }
         if (status.isNotEmpty()) canvas.drawText(status, width - 4 * dp, 11 * dp, statusPaint)
         return anim
@@ -437,7 +481,10 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val y = e.getY(i)
                 if (alts != null) return true   // one alternates popup at a time
                 if (y < stripH) {
-                    if (e.actionMasked == MotionEvent.ACTION_DOWN) stripDown = x
+                    if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                        stripDown = x; stripLongDone = false
+                        ui.removeCallbacks(stripLongPress); ui.postDelayed(stripLongPress, LONG_PRESS_MS)
+                    }
                     return true
                 }
                 val ux = x / keyW
@@ -485,8 +532,11 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (k?.type == KeyType.TO_SYMBOLS && e.actionMasked != MotionEvent.ACTION_CANCEL) {
                     if (e.eventTime - symDownAt > LONG_PRESS_MS) listener.onSwitchIme() else listener.onKey(k, Touch.APOS)
                 }
-                if (k == null && e.actionMasked == MotionEvent.ACTION_UP && e.getY(i) < stripH && stripDown >= 0) {
-                    if (suggestions.isEmpty()) {
+                ui.removeCallbacks(stripLongPress)
+                if (k == null && e.actionMasked == MotionEvent.ACTION_UP && e.getY(i) < stripH && stripDown >= 0 && !stripLongDone) {
+                    if (!actionRect.isEmpty && e.getX(i) >= actionRect.left - 4 * dp) {
+                        buzz(); listener.onStripAction()
+                    } else if (suggestions.isEmpty()) {
                         val x = e.getX(i)
                         when {
                             !chipRect.isEmpty && chipRect.contains(x, e.getY(i)) -> { buzz(); listener.onPasteChip() }
@@ -495,7 +545,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                             x < (14 + 3 * TOOL_W - 4) * dp -> listener.onEmoji()
                         }
                     } else {
-                        val cell = (e.getX(i) / (width / 3f)).toInt().coerceIn(0, 2)
+                        val cell = (e.getX(i) / (cellsW() / 3f)).toInt().coerceIn(0, 2)
                         val si = intArrayOf(1, 0, 2)[cell]
                         if (si < suggestions.size) {
                             buzz()

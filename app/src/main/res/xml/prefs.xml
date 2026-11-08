@@ -7,6 +7,12 @@
     <PreferenceCategory app:title="Typing" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat app:key="autocorrect" app:title="Autocorrect" app:defaultValue="true"
             app:summary="Correct the word on space / punctuation. Backspace right after a correction undoes it." app:iconSpaceReserved="false" />
+        <ListPreference app:key="correction_mode" app:title="Correction mode" app:defaultValue="auto"
+            app:entries="@array/correction_modes" app:entryValues="@array/correction_mode_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="confident_only" app:title="Only auto-correct when confident" app:defaultValue="false"
+            app:summary="Unsure corrections are underlined and suggested instead of applied" app:iconSpaceReserved="false" />
+        <Preference app:key="dictionary" app:title="Personal dictionary"
+            app:summary="Words that are never corrected or flagged" app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="rewind" app:title="Fix to/too, their/there… from later words" app:defaultValue="true"
             app:summary="When the model is very sure, re-check confusable words up to 3 words back" app:iconSpaceReserved="false" />
  <SwitchPreferenceCompat app:key="clipboard" app:title="Clipboard suggestions and history" app:defaultValue="true"
@@ -45,7 +51,7 @@
         <SwitchPreferenceCompat app:key="upload_wifi_only" app:title="Upload on Wi-Fi only" app:defaultValue="true" app:dependency="share_data" app:iconSpaceReserved="false" />
         <EditTextPreference app:key="upload_url" app:title="Upload server URL" app:dependency="share_data" app:iconSpaceReserved="false" />
         <Preference app:key="delete_uploaded" app:title="Delete my uploaded data"
-            app:summary="Remove everything this phone has sent from the server, clear the local log and start over with a new random ID" app:iconSpaceReserved="false" />
+            app:summary="Remove everything this phone has sent from the server, clear the local log and personal dictionary, and start over with a new random ID" app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="Advanced" app:iconSpaceReserved="false">

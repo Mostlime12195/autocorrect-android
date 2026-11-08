@@ -28,6 +28,22 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
   apostrophes "im" → "i'm", g-drops), with the per-kind penalties from `web/site/params_v2.json`. camelCase tokens are
   never split or merged. The **formal** style also adds sentence capitals, i → I and punctuation after the previous
   word (end-of-message punctuation is not done yet).
+- Correction mode: **Auto-correct** (default) or **Suggest only (never edit my text)**. Suggest-only never changes
+  committed text (no late corrections, re-checks, rewinds, capitals or punctuation): a likely typo (model choice !=
+  typed word and the fix beats it by `KeyboardController.FLAG_MARGIN`, 1.5) is committed with a `SuggestionSpan`
+  (misspelled + easy-correct, top fixes) so apps that support it show the red underline and their tap-to-fix menu, and the
+  strip shows "typo?" with the top 3 fixes for the most recent flagged word (tap = replace) plus a **not a typo** chip
+  (spelling flags) or **ignore** (other flags). **Only auto-correct when confident** (auto mode, off by default):
+  corrections whose margin over every other candidate is below `CONFIDENT_MARGIN` (3.0) are underlined and suggested
+  instead of applied.
+- Personal dictionary (`files/dict/words.txt`, settings → Personal dictionary: search, add, delete, clear all, import
+  Android's personal dictionary where the system allows it). Dictionary words are never corrected, flagged or rewound,
+  and are offered as candidates for near-miss typos (spatial cost + a small prior). Words get in via "not a typo",
+  long-press on the word as typed in the strip, or by undoing the same spelling fix twice (toast + an undo chip).
+  Grammar guard: only spelling fixes teach the dictionary (typed word not in the lexicon, one word, not just capitals /
+  punctuation / apostrophes). Undoing anything else (confusable swaps like their/there, capitals, punctuation,
+  rewinds, multi-word edits) only adds a suppression: the same edit needs 3 more nats for 7 days (`files/dict/learn.tsv`).
+  "Delete my uploaded data" wipes both files.
 - Suggestion strip: top 3. While typing it shows cheap suggestions (spatial + word frequency); after a correction it
   shows the alternatives, and tapping one replaces the corrected word.
 - Models (downloaded on first run, see below): m2 style 106M int4 (default), m2 style int8, m2 106M int4 / int8, Block

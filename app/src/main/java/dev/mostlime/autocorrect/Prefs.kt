@@ -26,6 +26,9 @@ class Prefs(private val ctx: Context) {
     val style get() = sp.getString(STYLE, "standard") ?: "standard"
     val autocorrect get() = sp.getBoolean(AUTOCORRECT, true)
     val rewind get() = sp.getBoolean(REWIND, true)
+    /** "suggest" = never edit the text, only underline likely typos and suggest fixes */
+    val suggestOnly get() = sp.getString(CORRECTION_MODE, "auto") == "suggest"
+    val confidentOnly get() = sp.getBoolean(CONFIDENT_ONLY, false)
     val clipboard get() = sp.getBoolean(CLIPBOARD, true)
     val numberRow get() = sp.getBoolean(NUMBER_ROW, false)
     val heightPercent get() = sp.getInt(HEIGHT, 100).coerceIn(80, 130)
@@ -63,6 +66,8 @@ class Prefs(private val ctx: Context) {
         const val STYLE = "style"
         const val AUTOCORRECT = "autocorrect"
         const val REWIND = "rewind"
+        const val CORRECTION_MODE = "correction_mode"
+        const val CONFIDENT_ONLY = "confident_only"
         const val CLIPBOARD = "clipboard"
         const val NUMBER_ROW = "number_row"
         const val HEIGHT = "kb_height"

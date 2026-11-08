@@ -105,6 +105,7 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             prefs.pendingDeletes = prefs.pendingDeletes + old
             prefs.rotateInstallId()
             app.events.clear()
+            app.user.clearAll()   // personal dictionary + learned edits are local data too
             prefs.uploadOffset = app.events.endOffset()
             val r = UploadClient.delete(UploadClient.deleteUrl(prefs.uploadUrl, old))
             Log.i(TAG, "delete my data: ${r.code} ${r.body.take(200)}")

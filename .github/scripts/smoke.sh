@@ -68,6 +68,49 @@ adb shell uiautomator dump /sdcard/ui.xml >/dev/null
 adb pull /sdcard/ui.xml smoke/ui1.xml >/dev/null
 TEXT=$(grep -o 'text="[^"]*" resource-id="dev.mostlime.autocorrect:id/try_it"' smoke/ui1.xml | sed 's/text="\([^"]*\)".*/\1/')
 echo "typed text: '$TEXT'"
+
+# suggest-only mode: switch it in settings, type typos, the text must stay exactly as typed (typos underlined)
+tap_text() {  # tap the first UI element whose text starts with $1 (scrolling the settings list down to find it)
+  for i in 1 2 3 4 5 6 7 8; do
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null; adb pull /sdcard/ui.xml smoke/ui_s.xml >/dev/null
+    B=$(grep -o "text=\"$1[^\"]*\"[^>]*bounds=\"[^\"]*\"" smoke/ui_s.xml | head -1 | grep -o 'bounds="[^"]*"' | grep -o '[0-9]*' | tr '\n' ' ')
+    if [ -n "$B" ]; then set -- $B; adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); return 0; fi
+    adb shell input swipe $((W / 2)) $((H * 3 / 4)) $((W / 2)) $((H / 3)) 300; sleep 1
+  done
+  echo "not found: $1"; return 1
+}
+adb shell input keyevent KEYCODE_BACK; sleep 2
+if tap_text "Correction mode"; then
+  sleep 2; tap_text "Suggest only" && echo "suggest-only mode on"; sleep 2
+  for i in 1 2 3 4 5 6 7 8; do adb shell input swipe $((W / 2)) $((H / 3)) $((W / 2)) $((H * 3 / 4)) 200; done
+  sleep 1
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null; adb pull /sdcard/ui.xml smoke/ui2.xml >/dev/null
+  B=$(grep -o 'resource-id="dev.mostlime.autocorrect:id/try_it"[^>]*bounds="[^"]*"' smoke/ui2.xml | grep -o 'bounds="[^"]*"' | grep -o '[0-9]*' | tr '\n' ' ')
+  set -- $B
+  adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); sleep 3
+  adb shell input keyevent KEYCODE_MOVE_END
+  adb shell input keyevent $(printf '67 %.0s' $(seq 1 150))
+  python3 - "$W" "$DPI" "$TOP" > smoke/taps2.txt <<'PY'
+import sys
+W, dpi, top = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+d = dpi / 160; kw = W / 10; rh = min(max(kw * 1.25, 46 * d), 58 * d); strip = 44 * d
+rows = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm']; off = [0, 0.5, 1.5]
+def key(c):
+    if c == ' ': return (5.0 * kw, top + strip + 3.5 * rh)
+    for r, row in enumerate(rows):
+        if c in row: return ((off[r] + row.index(c) + 0.5) * kw, top + strip + (r + 0.5) * rh)
+for c in "i wnat to go hoem now ":
+    x, y = key(c); print(int(x), int(y))
+PY
+  while read X Y; do adb shell input tap $X $Y < /dev/null; sleep 0.4; done < smoke/taps2.txt
+  sleep 20
+  adb exec-out screencap -p > smoke/suggest_only.png
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null; adb pull /sdcard/ui.xml smoke/ui3.xml >/dev/null
+  TEXT2=$(grep -o 'text="[^"]*" resource-id="dev.mostlime.autocorrect:id/try_it"' smoke/ui3.xml | sed 's/text="\([^"]*\)".*/\1/')
+  echo "suggest-only text: '$TEXT2'"
+  case "$TEXT2" in *"wnat to go hoem"*) echo "OK: suggest-only left the typos as typed";; *) echo "WARN: suggest-only text changed or missing";; esac
+fi
+
 adb logcat -d > smoke/logcat.txt
 grep -E "AcEngine|AcIME|AcLog|ModelStore" smoke/logcat.txt | tail -30
 echo "per-word timings:"; grep "AcIME: word" smoke/logcat.txt | sed 's/.*AcIME: //'

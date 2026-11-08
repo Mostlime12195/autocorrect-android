@@ -4,6 +4,8 @@ import android.app.Application
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
+import java.io.File
+import dev.mostlime.autocorrect.engine.UserData
 import dev.mostlime.autocorrect.log.EventLog
 import dev.mostlime.autocorrect.log.UploadWorker
 import dev.mostlime.autocorrect.model.ModelStore
@@ -15,6 +17,8 @@ class App : Application() {
         private set
     lateinit var events: EventLog
         private set
+    /** personal dictionary + learned edits (files/dict, shared by the keyboard and settings processes) */
+    val user: UserData by lazy { UserData(File(filesDir, "dict/words.txt"), File(filesDir, "dict/learn.tsv")) }
 
     override fun onCreate() {
         super.onCreate()
