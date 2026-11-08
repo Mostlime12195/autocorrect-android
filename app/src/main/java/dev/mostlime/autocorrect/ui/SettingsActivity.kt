@@ -6,7 +6,7 @@ import android.provider.Settings
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -34,9 +34,10 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_settings)
         val root = findViewById<View>(R.id.root)
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
-            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
-            v.setPadding(b.left, 0, b.right, b.bottom); insets
+            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime() or WindowInsetsCompat.Type.displayCutout())
+            v.setPadding(b.left, b.top, b.right, b.bottom); insets
         }
+        setSupportActionBar(findViewById(R.id.toolbar))
         if (savedInstanceState == null) supportFragmentManager.beginTransaction().replace(R.id.prefs, Fragment()).commit()
     }
 
@@ -53,21 +54,13 @@ class SettingsActivity : AppCompatActivity() {
                 setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
             }
             findPreference<Preference>(Prefs.BATTERY_SAVER)!!.setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
-            findPreference<Preference>("enable_keyboard")!!.setOnPreferenceClickListener {
-                startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)); true
-            }
-            findPreference<Preference>("switch_keyboard")!!.setOnPreferenceClickListener {
-                (requireContext().getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker(); true
-            }
-            findPreference<Preference>("model_status")!!.setOnPreferenceClickListener {
-                DownloadWorker.start(requireContext(), app.store.activeSpec().id); true
-            }
+            findPreference<ModelCard>("model_card")!!.onAction = { DownloadWorker.start(requireContext(), app.store.activeSpec().id) }
             findPreference<Preference>("export")!!.setOnPreferenceClickListener { export(); true }
             findPreference<Preference>("stats_reset")!!.setOnPreferenceClickListener {
                 app.prefs.statsResetAt = System.currentTimeMillis(); refresh(); true
             }
             findPreference<Preference>("clear")!!.setOnPreferenceClickListener {
-                AlertDialog.Builder(requireContext()).setTitle("Clear local data?")
+                MaterialAlertDialogBuilder(requireContext()).setTitle("Clear local data?")
                     .setMessage("Deletes the correction log stored on this phone. Already uploaded data is not affected.")
                     .setPositiveButton("Clear") { _, _ ->
                         lifecycleScope.launch { withContext(Dispatchers.IO) { app.events.clear() }; refresh() }
@@ -113,34 +106,49 @@ class SettingsActivity : AppCompatActivity() {
             refresh()
         }
 
-        private fun showDownload(w: WorkInfo?) {
-            val p = findPreference<Preference>("model_status") ?: return
-            val spec = app.store.activeSpec()
-            when (w?.state) {
-                WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED -> {
-                    val done = w.progress.getLong(DownloadWorker.KEY_DONE, 0)
-                    val total = w.progress.getLong(DownloadWorker.KEY_TOTAL, spec.downloadBytes)
-                    p.summary = if (done > 0) "Downloading ${spec.label}: ${100 * done / maxOf(total, 1)}% (${done / 1_000_000} / ${total / 1_000_000} MB)"
-                    else "Waiting for network to download ${spec.label}…"
-                }
-                WorkInfo.State.FAILED -> p.summary = "Download failed: ${w.outputData.getString(DownloadWorker.KEY_ERROR)}. Tap to retry."
-                else -> refresh()
-            }
-        }
+        private var download: WorkInfo? = null
+
+        private fun showDownload(w: WorkInfo?) { download = w; refresh() }
+
+        private fun mb(b: Long) = "${(b + 500_000) / 1_000_000} MB"
 
         private fun refresh() {
             val ctx = context ?: return
             val imm = ctx.getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
             val enabled = imm.enabledInputMethodList.any { it.packageName == ctx.packageName }
             val current = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)?.startsWith(ctx.packageName) == true
-            findPreference<Preference>("enable_keyboard")?.summary = if (enabled) "Enabled ✓" else "Tap, then turn on \"Autocorrect keyboard\""
-            findPreference<Preference>("switch_keyboard")?.summary = if (current) "In use ✓" else "Tap and pick \"Autocorrect keyboard\""
             val spec = app.store.activeSpec()
-            val st = findPreference<Preference>("model_status")
-            if (app.store.isInstalled(spec)) {
-                st?.summary = "${spec.label}: installed (${spec.downloadBytes / 1_000_000} MB)"
-            } else if (st?.summary?.startsWith("Downloading") != true) {
-                st?.summary = "${spec.label}: not downloaded (${spec.downloadBytes / 1_000_000} MB). Tap to download."
+            val installed = app.store.isInstalled(spec)
+            val w = download
+            val running = w?.state == WorkInfo.State.RUNNING || w?.state == WorkInfo.State.ENQUEUED
+            findPreference<SetupCard>("setup_card")?.steps = listOf(
+                SetupCard.Step("Enable the keyboard", if (enabled) "Enabled" else "Turn on \"Autocorrect keyboard\" in system settings", enabled, "Enable") {
+                    startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                },
+                SetupCard.Step("Switch to it", if (current) "In use" else "Pick \"Autocorrect keyboard\" as your keyboard", current, "Switch") {
+                    imm.showInputMethodPicker()
+                },
+                SetupCard.Step("Download the model", if (installed) "${spec.label} is ready" else if (running) "Downloading…" else "${mb(spec.downloadBytes)}, Wi-Fi recommended",
+                    installed, if (running) null else "Download") { DownloadWorker.start(ctx, spec.id) },
+            )
+            findPreference<ModelCard>("model_card")?.apply {
+                name = spec.label
+                size = mb(spec.downloadBytes)
+                when {
+                    installed -> { status = "Installed · runs on this phone, nothing leaves it"; progress = -1; action = null }
+                    running -> {
+                        val done = w!!.progress.getLong(DownloadWorker.KEY_DONE, 0)
+                        val total = w.progress.getLong(DownloadWorker.KEY_TOTAL, spec.downloadBytes)
+                        status = if (done > 0) "Downloading ${mb(done)} of ${mb(total)}" else "Waiting for network…"
+                        progress = if (done > 0) (100 * done / maxOf(total, 1)).toInt() else -2
+                        action = null
+                    }
+                    w?.state == WorkInfo.State.FAILED -> {
+                        status = "Download failed: ${w.outputData.getString(DownloadWorker.KEY_ERROR)}"; progress = -1; action = "Retry"
+                    }
+                    else -> { status = "Not downloaded yet"; progress = -1; action = "Download" }
+                }
+                update()
             }
             lifecycleScope.launch {
                 val st = withContext(Dispatchers.IO) { LogStats.compute(app.events.file, BuildConfig.VERSION_NAME, app.prefs.statsResetAt) }

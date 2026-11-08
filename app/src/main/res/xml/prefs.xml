@@ -1,28 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <PreferenceCategory app:title="Setup" app:iconSpaceReserved="false">
-        <Preference app:key="enable_keyboard" app:title="1. Enable the keyboard" app:iconSpaceReserved="false" />
-        <Preference app:key="switch_keyboard" app:title="2. Switch to it" app:summary="Pick Autocorrect keyboard in the input method list" app:iconSpaceReserved="false" />
-        <Preference app:key="model_status" app:title="3. Model" app:iconSpaceReserved="false" />
-    </PreferenceCategory>
+    <dev.mostlime.autocorrect.ui.SetupCard app:key="setup_card" />
+    <dev.mostlime.autocorrect.ui.ModelCard app:key="model_card" />
 
-    <PreferenceCategory app:title="Autocorrect" app:iconSpaceReserved="false">
+    <PreferenceCategory app:title="Typing" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat app:key="autocorrect" app:title="Autocorrect" app:defaultValue="true"
             app:summary="Correct the word on space / punctuation. Backspace right after a correction undoes it." app:iconSpaceReserved="false" />
- <SwitchPreferenceCompat app:key="rewind" app:title="Fix to/too, their/there… from later words" app:defaultValue="true"
+        <SwitchPreferenceCompat app:key="rewind" app:title="Fix to/too, their/there… from later words" app:defaultValue="true"
             app:summary="When the model is very sure, re-check confusable words up to 3 words back" app:iconSpaceReserved="false" />
-        <ListPreference app:key="model" app:title="Model" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="battery_saver" app:title="Battery saver" app:defaultValue="false"
-            app:summary="Use the small 34M model (lm_block4) instead of m2" app:iconSpaceReserved="false" />
         <ListPreference app:key="style" app:title="Style" app:defaultValue="standard"
             app:entries="@array/styles" app:entryValues="@array/style_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="haptics" app:title="Vibrate on key press" app:defaultValue="true" app:iconSpaceReserved="false" />
         <ListPreference app:key="haptic_strength" app:title="Vibration strength" app:defaultValue="1" app:dependency="haptics"
             app:entries="@array/haptic_strengths" app:entryValues="@array/haptic_strength_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
-        <SwitchPreferenceCompat app:key="debug_overlay" app:title="Debug overlay" app:defaultValue="false"
-            app:summary="Show model, timings (cold load, first inference, per word) and LM skip rate in the suggestion strip" app:iconSpaceReserved="false" />
-        <Preference app:key="stats" app:title="Stats" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Model" app:iconSpaceReserved="false">
+        <ListPreference app:key="model" app:title="Model" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="battery_saver" app:title="Battery saver" app:defaultValue="false"
+            app:summary="Use the small 34M model instead of m2" app:iconSpaceReserved="false" />
+        <Preference app:key="stats" app:title="Stats" app:selectable="false" app:iconSpaceReserved="false" />
         <Preference app:key="stats_reset" app:title="Reset stats" app:summary="Count from now on (the log itself is kept)" app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
@@ -36,9 +34,14 @@
         <EditTextPreference app:key="upload_url" app:title="Upload server URL" app:dependency="share_data" app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="Advanced" app:iconSpaceReserved="false">
+        <SwitchPreferenceCompat app:key="debug_overlay" app:title="Debug overlay" app:defaultValue="false"
+            app:summary="Show model, timings and top candidates in the suggestion strip" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="About" app:iconSpaceReserved="false">
         <Preference app:key="version" app:title="Version" app:selectable="false" app:iconSpaceReserved="false" />
         <Preference app:key="licenses" app:title="Open-source licenses" app:selectable="false" app:iconSpaceReserved="false"
-            app:summary="Icons: Material Symbols by Google, Apache License 2.0 (github.com/google/material-design-icons).\nonnxruntime: MIT License (Microsoft). AndroidX, Kotlin, kotlinx: Apache License 2.0.\nModels and lexicon: github.com/Mostlime12195/autocorrect-models." />
+            app:summary="Icons: Material Symbols by Google, Apache License 2.0 (github.com/google/material-design-icons).\nonnxruntime: MIT License (Microsoft). AndroidX, Material Components, Kotlin, kotlinx: Apache License 2.0.\nModels and lexicon: github.com/Mostlime12195/autocorrect-models." />
     </PreferenceCategory>
 </PreferenceScreen>

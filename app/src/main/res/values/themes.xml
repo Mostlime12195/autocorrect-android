@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Autocorrect" parent="Theme.AppCompat.DayNight.DarkActionBar">
-        <item name="colorPrimary">#2E7D32</item>
-        <item name="colorPrimaryDark">#1B5E20</item>
-        <item name="colorAccent">#66BB6A</item>
+    <!-- Material 3 with dynamic (Material You) colors on Android 12+ -->
+    <style name="Theme.Autocorrect" parent="Theme.Material3.DynamicColors.DayNight.NoActionBar">
+        <item name="colorAccent">?attr/colorPrimary</item>
+        <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
     </style>
 </resources>

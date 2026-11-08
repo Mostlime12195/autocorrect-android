@@ -43,7 +43,7 @@ Every event has `v` (event schema, 1), `ts` (ms since epoch, phone clock) and `t
 | `candidates` | array | up to 8, best first: `{w, kind, sp, lm, score}`; `kind` is word / split / space / contr / contr_rw / gdrop, `sp` spatial log-lik, `lm` LM log-prob (null when the LM didn't run), `score` final score |
 | `chosen` | string | what autocorrect picked |
 | `final` | string | what ended up in the text |
-| `outcome` | string | `accepted` (kept), `undone` (backspace right after reverted it to `typed`), `strip_pick` (user tapped a suggestion; `final` is the pick) |
+| `outcome` | string | `accepted` (kept), `undone` (backspace or the undo chip reverted it to `typed`), `strip_pick` (user tapped a suggestion; `final` is the pick), `dropped_stale` (the text changed before the result landed) |
 | `recheck` | object? | `{from, to}` when the re-check of the previous word changed it |
 | `style` | string | casual / standard / formal |
 | `model` | string | manifest model id (m2_int4, m2_int8, block4, none) |
@@ -60,7 +60,13 @@ Every event has `v` (event schema, 1), `ts` (ms since epoch, phone clock) and `t
 
 ### `perf`: a finished word that was not changed (no text)
 
-`model, lm_ms, n_scored, n_cands, skipped, cheap`.
+`model, app_version, lm_ms, n_scored, n_cands, skipped, cheap, ctx_tokens`.
+
+### `rewind`: a confusable word fixed from later words (to/too/two, there/their/they're, your/you're, its/it's, then/than, lose/loose, were/where/we're, of/off, a/an)
+
+`id, from, to, margin` (LM log-prob margin × lam_r, at least 6), `words_back` (1-3), `left_context` (≤120 chars),
+`right_context` (the words typed after it), `outcome` (`accepted`, or a second line with the same `id` and `undone` when
+the undo chip put it back), `style, model, app_version`.
 
 ### `session`: model load timings (no text), once per session load, after its first LM inference
 
