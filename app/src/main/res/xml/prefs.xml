@@ -44,6 +44,6 @@
     <PreferenceCategory app:title="About" app:iconSpaceReserved="false">
         <Preference app:key="version" app:title="Version" app:selectable="false" app:iconSpaceReserved="false" />
         <Preference app:key="licenses" app:title="Open-source licenses" app:selectable="false" app:iconSpaceReserved="false"
-            app:summary="Icons: Material Symbols by Google, Apache License 2.0 (github.com/google/material-design-icons).\nonnxruntime: MIT License (Microsoft). AndroidX, Material Components, Kotlin, kotlinx: Apache License 2.0.\nModels and lexicon: github.com/Mostlime12195/autocorrect-models." />
+            app:summary="Icons: Material Symbols by Google, Apache License 2.0 (github.com/google/material-design-icons).\nonnxruntime: MIT License (Microsoft). AndroidX, Material Components, Kotlin, kotlinx: Apache License 2.0.\nEmoji data: Unicode emoji-test.txt, © Unicode, Inc., Unicode License v3.\nModels and lexicon: github.com/Mostlime12195/autocorrect-models." />
     </PreferenceCategory>
 </PreferenceScreen>

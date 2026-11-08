@@ -108,3 +108,111 @@ class ClipboardPanel(ctx: Context, private val pal: Palette, private val store: 
         }
     }
 }
+
+/** Emoji from assets/emoji.tsv (Unicode emoji-test.txt), only those the system font can draw. */
+object EmojiData {
+    val TABS = listOf("smileys" to "😀", "people" to "👋", "nature" to "🐶", "food" to "🍔", "travel" to "✈️",
+        "activities" to "⚽", "objects" to "💡", "symbols" to "❤️", "flags" to "🏁")
+    @Volatile private var data: Map<String, List<String>>? = null
+
+    fun get(ctx: Context): Map<String, List<String>> {
+        data?.let { return it }
+        val paint = android.graphics.Paint()
+        val m = LinkedHashMap<String, MutableList<String>>()
+        ctx.assets.open("emoji.tsv").bufferedReader().useLines { lines ->
+            for (l in lines) {
+                val p = l.split('\t')
+                if (p.size < 2) continue
+                if (!paint.hasGlyph(p[1])) continue
+                m.getOrPut(p[0]) { ArrayList() }.add(p[1])
+            }
+        }
+        data = m
+        return m
+    }
+}
+
+/** Grid of emoji drawn on one canvas (thousands of TextViews would be slow). */
+@SuppressLint("ViewConstructor")
+class EmojiGrid(ctx: Context, pal: Palette, private val onPick: (String) -> Unit) : View(ctx) {
+    var items: List<String> = emptyList()
+        set(v) { field = v; requestLayout(); invalidate() }
+    private val cell = Ui.dp(this, 46f)
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = Ui.dp(this@EmojiGrid, 28f); textAlign = android.graphics.Paint.Align.CENTER; color = pal.fg
+    }
+    private var cols = 8
+    private var downAt = -1
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        cols = maxOf(1, (w / cell).toInt())
+        val rows = (items.size + cols - 1) / cols
+        setMeasuredDimension(w, (rows * cell).toInt() + Ui.dp(this, 8f).toInt())
+    }
+
+    override fun onDraw(c: android.graphics.Canvas) {
+        val cw = width.toFloat() / cols
+        for ((i, e) in items.withIndex()) {
+            val x = (i % cols) * cw + cw / 2
+            val y = (i / cols) * cell + cell / 2 + paint.textSize / 3
+            c.drawText(e, x, y, paint)
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: android.view.MotionEvent): Boolean {
+        val cw = width.toFloat() / cols
+        val i = (e.y / cell).toInt() * cols + (e.x / cw).toInt().coerceIn(0, cols - 1)
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> downAt = i
+            android.view.MotionEvent.ACTION_UP -> {
+                if (i == downAt && i in items.indices) { performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); onPick(items[i]) }
+                downAt = -1
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> downAt = -1
+        }
+        return true
+    }
+}
+
+/** Emoji panel: recents + Unicode categories, backspace, back to the keys. */
+@SuppressLint("ViewConstructor")
+class EmojiPanel(ctx: Context, private val pal: Palette, private val data: Map<String, List<String>>,
+                 private val recents: () -> List<String>, onPick: (String) -> Unit, onBackspace: () -> Unit, onBack: () -> Unit) : LinearLayout(ctx) {
+    private val grid = EmojiGrid(ctx, pal) { e -> onPick(e) }
+    private val scroll = ScrollView(ctx).apply { addView(grid) }
+    private val tabViews = ArrayList<TextView>()
+
+    init {
+        orientation = VERTICAL
+        setBackgroundColor(pal.bg)
+        val bar = LinearLayout(ctx).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        bar.addView(Ui.iconButton(ctx, R.drawable.ms_abc, pal.fg, "Back to the keyboard", onBack))
+        val tabs = LinearLayout(ctx).apply { orientation = HORIZONTAL }
+        val all = listOf("recent" to "🕘") + EmojiData.TABS
+        for ((key, label) in all) {
+            val tv = TextView(ctx).apply {
+                text = label; setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f); gravity = Gravity.CENTER
+                val p = Ui.dp(this, 8f).toInt(); setPadding(p, p, p, p)
+                setOnClickListener { select(key) }
+                tag = key
+            }
+            tabViews.add(tv); tabs.addView(tv)
+        }
+        bar.addView(android.widget.HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false; addView(tabs) },
+            LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(Ui.iconButton(ctx, R.drawable.ms_backspace, pal.fg, "Delete", onBackspace))
+        addView(bar)
+        addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        select(if (recents().isNotEmpty()) "recent" else "smileys")
+    }
+
+    private fun select(key: String) {
+        grid.items = if (key == "recent") recents() else data[key].orEmpty()
+        scroll.scrollTo(0, 0)
+        for (t in tabViews) t.background = if (t.tag == key) GradientDrawable().apply {
+            setColor(pal.accentSoft); cornerRadius = Ui.dp(this@EmojiPanel, 12f)
+        } else null
+    }
+}

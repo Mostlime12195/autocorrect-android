@@ -61,10 +61,15 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         override fun deleteKey(): Int {
             val c = ic ?: return -1
             if (!c.getSelectedText(0).isNullOrEmpty()) { c.commitText("", 1); return -1 }
-            val b = c.getTextBeforeCursor(2, 0)?.toString() ?: ""
+            val b = c.getTextBeforeCursor(32, 0)?.toString() ?: ""
             if (b.isEmpty()) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return -1 }
-            c.deleteSurroundingTextInCodePoints(1, 0)
-            return if (b.length == 2 && Character.isSurrogatePair(b[0], b[1])) 2 else 1
+            // one user-perceived character (an emoji with modifiers / ZWJ sequence counts as one)
+            val it = android.icu.text.BreakIterator.getCharacterInstance()
+            it.setText(b)
+            val start = it.preceding(b.length).coerceAtLeast(0)
+            val n = (b.length - start).coerceAtLeast(1)
+            c.deleteSurroundingText(n, 0)
+            return n
         }
         override fun enter() { sendKeyChar('\n') }
         override fun capsMode(): Boolean {
@@ -161,6 +166,21 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         kv?.clipChip = if (app.prefs.clipboard && !ctl.config.policy.password) clips.recentOffer()?.text else null
     }
 
+    private val emojiRecents: MutableList<String> by lazy {
+        (getSharedPreferences("emoji", MODE_PRIVATE).getString("recent", "") ?: "").split('\u0001').filter { it.isNotEmpty() }.toMutableList()
+    }
+
+    private fun showEmoji() {
+        val r = root ?: return
+        val data = EmojiData.get(this)
+        r.showPanel(EmojiPanel(this, Palette(this), data, { emojiRecents.toList() }, { e ->
+            ctl.insertText(e)
+            emojiRecents.remove(e); emojiRecents.add(0, e)
+            while (emojiRecents.size > 32) emojiRecents.removeAt(emojiRecents.size - 1)
+            getSharedPreferences("emoji", MODE_PRIVATE).edit().putString("recent", emojiRecents.joinToString("\u0001")).apply()
+        }, { ctl.key(KeyboardLayout.LETTERS.keys.first { it.type == KeyType.BACKSPACE }, Touch.APOS) }) { r.hidePanel() })
+    }
+
     private fun showClipboard() {
         val r = root ?: return
         val p = ClipboardPanel(this, Palette(this), clips, { t -> ctl.insertText(t); clips.consumeOffer(); r.hidePanel(); updateClipChip() }) { r.hidePanel() }
@@ -255,6 +275,13 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     override fun onAlternate(text: String) = ctl.replaceLastChar(text)
 
     override fun onClipboard() = showClipboard()
+
+    override fun onEmoji() = showEmoji()
+
+    override fun onCommaLongPress() {
+        ctl.replaceLastChar("")
+        showEmoji()
+    }
 
     override fun onPasteChip() {
         val t = clips.recentOffer()?.text ?: return

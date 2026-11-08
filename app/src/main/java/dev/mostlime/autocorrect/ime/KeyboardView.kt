@@ -62,6 +62,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         fun onClipboard() {}
         fun onEmoji() {}
         fun onPasteChip() {}
+        /** long-press on comma: emoji (the comma the press typed is taken back) */
+        fun onCommaLongPress() {}
     }
 
     /** text of a recently copied clip, offered as a chip in an empty strip (null = none) */
@@ -179,6 +181,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private class Alts(val key: KeyDef, val pointer: Int, val options: List<String>, var sel: Int)
     private var alts: Alts? = null
     private val longPress = Runnable { openAlternates() }
+    private val commaLongPress = Runnable { buzz(strong = true); commaDone = true; listener.onCommaLongPress() }
+    private var commaDone = false
     private var longPressPointer = -1
 
     init { setBackgroundColor(pal.bg) }
@@ -438,6 +442,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (k.type == KeyType.TO_SYMBOLS) symDownAt = e.eventTime
                 else listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k))
                 if (k.type == KeyType.BACKSPACE) { repeatKey = k; repeats = 0; ui.postDelayed(repeater, REPEAT_START_MS) }
+                if (k.type == KeyType.CHAR && k.text == "," && layer === KeyboardLayout.LETTERS) {
+                    commaDone = false; ui.removeCallbacks(commaLongPress); ui.postDelayed(commaLongPress, LONG_PRESS_ALT_MS)
+                }
                 if (k.type == KeyType.CHAR && KeyboardLayout.alternates(k).isNotEmpty()) {
                     ui.removeCallbacks(longPress); longPressPointer = id; ui.postDelayed(longPress, LONG_PRESS_ALT_MS)
                 }
@@ -459,6 +466,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val k = pressed.remove(id)
                 if (k != null) released[k] = SystemClock.uptimeMillis()
                 if (id == longPressPointer) { ui.removeCallbacks(longPress); longPressPointer = -1 }
+                if (k?.text == ",") ui.removeCallbacks(commaLongPress)
                 val a = alts
                 if (a != null && a.pointer == id) {
                     if (e.actionMasked != MotionEvent.ACTION_CANCEL) listener.onAlternate(a.options[a.sel])
@@ -490,7 +498,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                     val t = SystemClock.uptimeMillis()
                     for (q in pressed.values) released[q] = t
                     pressed.clear(); stripDown = -1f; repeatKey = null
-                    ui.removeCallbacks(repeater); ui.removeCallbacks(longPress); alts = null
+                    ui.removeCallbacks(repeater); ui.removeCallbacks(longPress); ui.removeCallbacks(commaLongPress); alts = null
                 }
                 invalidate()
             }
