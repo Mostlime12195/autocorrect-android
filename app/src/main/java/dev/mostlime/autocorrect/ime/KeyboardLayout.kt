@@ -10,10 +10,12 @@ class KeyDef(val label: String, val text: String, val type: KeyType, val x: Floa
     val cx get() = x + w / 2
 }
 
-class Layer(val keys: List<KeyDef>) {
+class Layer(val keys: List<KeyDef>, val isLetters: Boolean = false, /** rows above the q row (number row) */ val letterRowOffset: Int = 0) {
+    val rows = keys.maxOf { it.row } + 1
+
     /** The key under (ux, row units) -- nearest key in the row so gaps and edges still hit something. */
     fun keyAt(ux: Float, uy: Float): KeyDef? {
-        val row = uy.toInt().coerceIn(0, 3)
+        val row = uy.toInt().coerceIn(0, rows - 1)
         val inRow = keys.filter { it.row == row }
         return inRow.firstOrNull { ux >= it.x && ux < it.x + it.w } ?: inRow.minByOrNull { kotlin.math.abs(it.cx - ux) }
     }
@@ -39,8 +41,15 @@ object KeyboardLayout {
         row("qwertyuiop", 0, 0f) + row("asdfghjkl", 1, 0.5f) +
             listOf(KeyDef("⇧", "", KeyType.SHIFT, 0f, 1.5f, 2)) + row("zxcvbnm", 2, 1.5f) +
             listOf(KeyDef("⌫", "", KeyType.BACKSPACE, 8.5f, 1.5f, 2)) +
-            bottom(KeyDef("?123", "", KeyType.TO_SYMBOLS, 0f, 1.5f, 3))
+            bottom(KeyDef("?123", "", KeyType.TO_SYMBOLS, 0f, 1.5f, 3)),
+        isLetters = true,
     )
+
+    /** Letters with the optional number row on top (the letter rows keep the model geometry, one row lower). */
+    val LETTERS_NUM = Layer(row("1234567890", 0, 0f) + LETTERS.keys.map { KeyDef(it.label, it.text, it.type, it.x, it.w, it.row + 1) },
+        isLetters = true, letterRowOffset = 1)
+
+    fun letters(numberRow: Boolean) = if (numberRow) LETTERS_NUM else LETTERS
 
     val SYMBOLS = Layer(
         row("1234567890", 0, 0f) + row("@#\$_&-+()/", 1, 0f) +
@@ -69,8 +78,8 @@ object KeyboardLayout {
     fun alternates(k: KeyDef): List<String> = if (k.type == KeyType.CHAR) ALTS[k.text].orEmpty() else emptyList()
 
     /** Touch in key-area units (ux key widths, uy rows) -> model units. Letters only; others give the APOS sentinel. */
-    fun modelTouch(ux: Float, uy: Float, key: KeyDef): Touch =
+    fun modelTouch(ux: Float, uy: Float, key: KeyDef, rowOffset: Int = 0): Touch =
         if (key.type == KeyType.CHAR && key.text.length == 1 && key.text[0].lowercaseChar() in 'a'..'z')
-            Touch(ux.toDouble(), uy.toDouble() * KeyGeom.ROW_H)
+            Touch(ux.toDouble(), (uy - rowOffset).toDouble() * KeyGeom.ROW_H)
         else Touch.APOS
 }

@@ -27,6 +27,8 @@ class Prefs(private val ctx: Context) {
     val autocorrect get() = sp.getBoolean(AUTOCORRECT, true)
     val rewind get() = sp.getBoolean(REWIND, true)
     val clipboard get() = sp.getBoolean(CLIPBOARD, true)
+    val numberRow get() = sp.getBoolean(NUMBER_ROW, false)
+    val heightPercent get() = sp.getInt(HEIGHT, 100).coerceIn(80, 130)
     val debugOverlay get() = sp.getBoolean(DEBUG, false)
     val haptics get() = sp.getBoolean(HAPTICS, true)
     val hapticStrength get() = (sp.getString(HAPTIC_STRENGTH, "1") ?: "1").toIntOrNull() ?: 1
@@ -53,6 +55,8 @@ class Prefs(private val ctx: Context) {
         const val AUTOCORRECT = "autocorrect"
         const val REWIND = "rewind"
         const val CLIPBOARD = "clipboard"
+        const val NUMBER_ROW = "number_row"
+        const val HEIGHT = "kb_height"
         const val DEBUG = "debug_overlay"
         const val HAPTICS = "haptics"
         const val HAPTIC_STRENGTH = "haptic_strength"

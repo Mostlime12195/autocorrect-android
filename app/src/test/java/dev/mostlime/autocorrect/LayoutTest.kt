@@ -20,6 +20,16 @@ class LayoutTest {
         assertTrue("unreachable: $missing", missing.isEmpty())
     }
 
+    @Test fun numberRowKeepsLetterTouchesInModelUnits() {
+        val l = KeyboardLayout.LETTERS_NUM
+        val q = l.keys.first { it.text == "q" }
+        assertTrue(q.row == 1 && l.rows == 5)
+        // a touch in the middle of q (row 1 on screen) is row 0 (y = 0.7) for the spatial model
+        val t = KeyboardLayout.modelTouch(0.5f, 1.5f, q, l.letterRowOffset)
+        assertTrue(t.x == 0.5 && kotlin.math.abs(t.y - 0.7) < 1e-9)
+        assertTrue(l.keys.count { it.text in listOf("1", "0") } == 2)
+    }
+
     @Test fun letterGeometryMatchesTheModel() {
         // keyboard.py: row offsets 0 / 0.5 / 1.5, key width 1
         val k = KeyboardLayout.LETTERS.keys.associateBy { it.text }

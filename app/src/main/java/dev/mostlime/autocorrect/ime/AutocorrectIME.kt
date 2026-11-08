@@ -181,6 +181,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         }, { ctl.key(KeyboardLayout.LETTERS.keys.first { it.type == KeyType.BACKSPACE }, Touch.APOS) }) { r.hidePanel() })
     }
 
+    private fun letters() = KeyboardLayout.letters(app.prefs.numberRow)
+
     private fun showClipboard() {
         val r = root ?: return
         val p = ClipboardPanel(this, Palette(this), clips, { t -> ctl.insertText(t); clips.consumeOffer(); r.hidePanel(); updateClipChip() }) { r.hidePanel() }
@@ -217,9 +219,11 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         val v = kv
         v?.haptics = app.prefs.haptics
         v?.hapticStrength = app.prefs.hapticStrength
-        v?.layer = if (policy.numeric) KeyboardLayout.SYMBOLS else KeyboardLayout.LETTERS
+        v?.heightScale = app.prefs.heightPercent / 100f
+        v?.baseRows = letters().rows
+        v?.layer = if (policy.numeric) KeyboardLayout.SYMBOLS else letters()
         v?.enterLabel = enterLabel(editorInfo)
-        ctl.lettersLayer = v?.layer == KeyboardLayout.LETTERS
+        ctl.lettersLayer = v?.layer?.isLetters == true
         ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME, rewind = app.prefs.rewind))
         root?.hidePanel()
         if (!app.prefs.clipboard) clips.clear()
@@ -263,10 +267,10 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         when (key.type) {
             KeyType.TO_SYMBOLS -> kv?.layer = KeyboardLayout.SYMBOLS
             KeyType.TO_SYMBOLS2 -> kv?.layer = KeyboardLayout.SYMBOLS2
-            KeyType.TO_LETTERS -> kv?.layer = KeyboardLayout.LETTERS
+            KeyType.TO_LETTERS -> kv?.layer = letters()
             else -> { ctl.key(key, touch); return }
         }
-        ctl.lettersLayer = kv?.layer == KeyboardLayout.LETTERS
+        ctl.lettersLayer = kv?.layer?.isLetters == true
         if (ctl.lettersLayer) ctl.autoShift() else ctl.shift = Shift.OFF
     }
 

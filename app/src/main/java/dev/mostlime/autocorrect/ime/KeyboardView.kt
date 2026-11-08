@@ -74,6 +74,14 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
 
     var layer: Layer = KeyboardLayout.LETTERS
         set(v) { field = v; invalidate() }
+    /** rows the keyboard height is sized for (the letters layer, 5 with the number row); other layers stretch to fit */
+    var baseRows = 4
+        set(v) { if (v != field) { field = v; requestLayout() } }
+    /** row height of the current layer */
+    private val rh get() = rowH * baseRows / layer.rows
+    /** keyboard height setting: 0.8 .. 1.3 */
+    var heightScale = 1f
+        set(v) { if (v != field) { field = v; requestLayout() } }
     var shift = Shift.OFF
         set(v) { field = v; invalidate() }
     /** editor action label from the IME (Go / Search / Send / Next / Done / Prev / ⏎) */
@@ -214,13 +222,14 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         val w = View.MeasureSpec.getSize(widthMeasureSpec)
         keyW = w / 10f
         rowH = (keyW * 1.25f).coerceIn(46 * dp, 58 * dp)
-        setMeasuredDimension(w, (stripH + 4 * rowH + 8 * dp).toInt() + bottomInset)
+        rowH *= heightScale
+        setMeasuredDimension(w, (stripH + baseRows * rowH + 8 * dp).toInt() + bottomInset)
     }
 
     private fun keyRect(k: KeyDef, out: RectF) {
         val padX = 3 * dp
         val padY = 4 * dp
-        out.set(k.x * keyW + padX, stripH + k.row * rowH + padY, (k.x + k.w) * keyW - padX, stripH + (k.row + 1) * rowH - padY)
+        out.set(k.x * keyW + padX, stripH + k.row * rh + padY, (k.x + k.w) * keyW - padX, stripH + (k.row + 1) * rh - padY)
     }
 
     // ------------------------------------------------------------------ drawing
@@ -276,7 +285,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             textPaint.textSize = if (label.length > 1) 14 * dp else 22 * dp
             canvas.drawText(label, rect.centerX(), rect.centerY() + textPaint.textSize / 3, textPaint)
             // hint for the long-press alternate on the top row (digits)
-            if (layer === KeyboardLayout.LETTERS && k.row == 0) {
+            if (layer.isLetters && k.row == layer.letterRowOffset) {
                 KeyboardLayout.alternates(k).firstOrNull()?.let { alt ->
                     textPaint.color = pal.dim; textPaint.textSize = 9 * dp
                     canvas.drawText(alt, rect.right - 7 * dp, rect.top + 11 * dp, textPaint)
@@ -373,8 +382,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             val cw = keyW * 0.95f
             val w = cw * a.options.size
             val left = (rect.centerX() - cw / 2).coerceIn(2 * dp, width - w - 2 * dp)
-            val top = rect.top - rowH * 1.1f
-            rect.set(left, top, left + w, top + rowH)
+            val top = rect.top - rh * 1.1f
+            rect.set(left, top, left + w, top + rh)
             keyPaint.color = pal.popup
             keyPaint.setShadowLayer(6 * dp, 0f, 2 * dp, 0x55000000)
             canvas.drawRoundRect(rect, 10 * dp, 10 * dp, keyPaint)
@@ -396,7 +405,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
             if (k.type != KeyType.CHAR) continue
             keyRect(k, rect)
             val w = rect.width() * 1.2f
-            val h = rowH * 1.05f
+            val h = rh * 1.05f
             val cx = rect.centerX().coerceIn(w / 2 + 2 * dp, width - w / 2 - 2 * dp)
             rect.set(cx - w / 2, rect.top - h - 4 * dp, cx + w / 2, rect.top - 4 * dp)
             keyPaint.color = pal.popup
@@ -432,17 +441,17 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                     return true
                 }
                 val ux = x / keyW
-                val uy = (y - stripH) / rowH
-                val k = layer.keyAt(ux, min(uy, 3.99f)) ?: return true
+                val uy = (y - stripH) / rh
+                val k = layer.keyAt(ux, min(uy, layer.rows - 0.01f)) ?: return true
                 val id = e.getPointerId(i)
                 pressed[id] = k
                 buzz()
                 // text keys fire on press (keeps order when presses overlap); ?123 fires on release so a long press
                 // can open the keyboard switcher instead
                 if (k.type == KeyType.TO_SYMBOLS) symDownAt = e.eventTime
-                else listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k))
+                else listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
                 if (k.type == KeyType.BACKSPACE) { repeatKey = k; repeats = 0; ui.postDelayed(repeater, REPEAT_START_MS) }
-                if (k.type == KeyType.CHAR && k.text == "," && layer === KeyboardLayout.LETTERS) {
+                if (k.type == KeyType.CHAR && k.text == "," && layer.isLetters) {
                     commaDone = false; ui.removeCallbacks(commaLongPress); ui.postDelayed(commaLongPress, LONG_PRESS_ALT_MS)
                 }
                 if (k.type == KeyType.CHAR && KeyboardLayout.alternates(k).isNotEmpty()) {
