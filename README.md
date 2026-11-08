@@ -8,6 +8,13 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
   symbol layers, space, comma, period, enter whose icon follows the field's action (send / search / go / next / done /
   newline). Long-press: digits on the top row, accents (é, ñ, ü, ...), ? ! … on the period. Long-press ?123 opens the
   keyboard switcher; the gear in an empty strip opens settings.
+- Strip toolbar (settings, clipboard, emoji) when there's nothing to suggest. Clipboard: a paste chip for text copied in
+  the last 90 s and a history panel (last 10 + pinned, pin / delete, kept only on the phone, never sensitive clips or
+  copies made in password / incognito fields; can be turned off). Emoji: recents + Unicode categories (long-press comma
+  or the strip button). Optional number row; keyboard height 80-130%.
+- Confusion-set rewind: to/too/two, there/their/they're, your/you're, its/it's, then/than, lose/loose, were/where/we're,
+  of/off, a/an are re-checked up to 3 words back once later words are typed, and fixed only when the model is very sure
+  (margin 6, `Rewind.MARGIN`), in one edit with an undo chip.
 - Look and feel: Material Symbols icons (Apache 2.0), Material You dynamic colors (light / dark), key preview bubbles,
   press animation, strip fade-in, a flash when a correction lands and an undo chip with the word as typed.
 - Autocorrect on space / punctuation / enter, with the text before the cursor as the LM's left context (up to 400
@@ -24,7 +31,7 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
 - Suggestion strip: top 3. While typing it shows cheap suggestions (spatial + word frequency); after a correction it
   shows the alternatives, and tapping one replaces the corrected word.
 - Models (downloaded on first run, see below): m2 106M int4 (default), m2 106M int8, Block AttnRes 34M (battery saver).
-- Settings app: setup steps, model choice + download progress, battery saver, style (casual / standard / formal),
+- Settings app (Material 3): a setup card, a model card with size / status / download progress, battery saver, style (casual / standard / formal),
   autocorrect on/off, debug overlay, local log export / clear, opt-in data sharing.
 
 ## Install
