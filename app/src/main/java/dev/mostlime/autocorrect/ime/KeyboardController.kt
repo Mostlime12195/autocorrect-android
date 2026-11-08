@@ -2,6 +2,9 @@ package dev.mostlime.autocorrect.ime
 
 import dev.mostlime.autocorrect.engine.MergeInput
 import dev.mostlime.autocorrect.engine.PrevWord
+import dev.mostlime.autocorrect.engine.Rewind
+import dev.mostlime.autocorrect.engine.RewindChange
+import dev.mostlime.autocorrect.engine.RewindTarget
 import dev.mostlime.autocorrect.engine.SEG
 import dev.mostlime.autocorrect.engine.Slot
 import dev.mostlime.autocorrect.engine.Touch
@@ -34,6 +37,8 @@ interface CorrectionEngine {
     fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit)
     /** drop queued (not yet started) work */
     fun cancelQueued()
+    /** confusion-set rewind (needs the model; done(empty) without one) */
+    fun rewind(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) = done(emptyList())
 }
 
 interface ControllerUi {
@@ -59,6 +64,8 @@ class ControllerConfig(
     val style: String,
     val modelId: () -> String,
     val appVersion: String,
+    /** confusion-set rewind on/off */
+    val rewind: Boolean = true,
 )
 
 /**
@@ -144,7 +151,13 @@ class KeyboardController(
     private val held = ArrayList<() -> Unit>()
     private var holdToken: Any? = null
 
-    enum class StripMode { NONE, TYPING, LAST_WORD }
+    enum class StripMode { NONE, TYPING, LAST_WORD, REWIND }
+
+    /** words already rewound (or reverted by the user) by their start in the position counter: never touched again */
+    private val rewound = HashSet<Long>()
+    private var rewindBusy = false
+    private class RewindUndo(val start: Long, val from: String, val to: String, val event: MutableMap<String, Any?>?)
+    private var rewindUndo: RewindUndo? = null
     var stripMode = StripMode.NONE
         private set
     var shown: List<String> = emptyList()
@@ -159,7 +172,7 @@ class KeyboardController(
     fun startInput(cfg: ControllerConfig) {
         flushLast()
         config = cfg
-        resetWord(); last = null; prev = null; pendings.clear(); compLen = 0
+        resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null
         releaseHold()
         shift = Shift.OFF
         autoShift()
@@ -198,7 +211,7 @@ class KeyboardController(
                 val letter = ch in 'a'..'z' || ch in 'A'..'Z' || (Character.isLetter(ch) && composing.isNotEmpty())
                 if (letter || (ch == '\'' && composing.isNotEmpty())) {
                     flushLast()
-                    if (stripMode == StripMode.LAST_WORD) setStrip(emptyList(), -1, StripMode.NONE)
+                    if (stripMode == StripMode.LAST_WORD || stripMode == StripMode.REWIND) setStrip(emptyList(), -1, StripMode.NONE)
                     composing.append(c); touches.add(touch)
                     ed.setComposing(composing.toString())
                     if (shift == Shift.ON) shift = Shift.OFF
@@ -349,6 +362,109 @@ class KeyboardController(
         } finally {
             if (holding && holdDone()) releaseHold()
         }
+        if (r != null && !r.cheap) scheduleRewind()   // the model is loaded (skipped words count too)
+    }
+
+    // ------------------------------------------------------------------ confusion-set rewind
+    /**
+     * After a word's result lands (on time or late), re-check confusable words up to MAX_WORDS_BACK words back with the
+     * text typed since as right context. Runs only when no correction is in flight, on an unchanged snapshot.
+     */
+    private fun scheduleRewind() {
+        if (!config.rewind || rewindBusy || holding || pendings.isNotEmpty()) return
+        val ed = ed() ?: return
+        val cur = composing.toString()
+        val raw = ed.textBefore(CTX_CHARS + cur.length)
+        if (!raw.endsWith(cur) || ed.hasSelection()) return
+        val snap = raw.dropLast(cur.length)
+        val end = pos - cur.length            // position counter at the end of snap
+        val words = SEG.findAll(snap).toList()
+        if (words.size < 2) return
+        val targets = ArrayList<RewindTarget>()
+        val n = words.size
+        for (j in maxOf(0, n - 1 - Rewind.MAX_WORDS_BACK) until n - 1) {
+            val w = words[j]
+            val abs = end - (snap.length - w.range.first)
+            if (!Rewind.isTarget(w.value) || abs in rewound) continue
+            val (left, sep) = splitLeft(snap.substring(0, w.range.first))
+            targets.add(RewindTarget(w.range.first, w.value, left, sep, snap.substring(w.range.last + 1).trimEnd(), n - 1 - j))
+        }
+        if (targets.isEmpty()) return
+        rewindBusy = true
+        engine.rewind(targets) { changes -> rewindBusy = false; applyRewind(snap, end, changes) }
+    }
+
+    private fun applyRewind(snap: String, end: Long, changes: List<RewindChange>) {
+        if (changes.isEmpty() || holding || pendings.isNotEmpty()) return
+        val ed = ed() ?: return
+        val cur = composing.toString()
+        val first = changes.minOf { it.start }
+        val oldTail = snap.substring(first)
+        val x = pos - end                      // typed since the snapshot (incl. the composing word)
+        if (x < cur.length || x > MAX_AFTER) return
+        val xi = x.toInt()
+        val live = ed.textBefore(oldTail.length + xi + 1)
+        val L = live.length
+        if (L < oldTail.length + xi || live.substring(L - xi - oldTail.length, L - xi) != oldTail || ed.hasSelection() || !live.endsWith(cur)) return
+        val after = live.substring(L - xi)
+        val sb = StringBuilder(oldTail)
+        for (c in changes.sortedByDescending { it.start }) sb.replace(c.start - first, c.start - first + c.from.length, c.to)
+        val newTail = sb.toString()
+        val before = pos
+        ed.beginBatch()
+        if (cur.isNotEmpty()) ed.finishComposing()
+        ed.replaceBefore(oldTail.length + xi, newTail + after.dropLast(cur.length))
+        if (cur.isNotEmpty()) ed.setComposing(cur)
+        ed.endBatch()
+        val delta = pos - before
+        val regionStart = end - oldTail.length
+        for (o in pendings) if (o.anchor > regionStart) o.anchor += delta
+        prev = null; last = null
+        ui.onApplied()
+        // the last change gets the undo chip; all are logged
+        var lastEv: MutableMap<String, Any?>? = null
+        for (c in changes) {
+            val abs = end - (snap.length - c.start)
+            rewound.add(abs)
+            if (!config.policy.sensitive) {
+                val e = linkedMapOf<String, Any?>("v" to 1, "id" to UUID.randomUUID().toString(), "ts" to System.currentTimeMillis(),
+                    "type" to "rewind", "from" to c.from, "to" to c.to, "margin" to r3(c.margin), "words_back" to c.wordsBack,
+                    "left_context" to snap.substring(0, c.start).takeLast(LOG_CONTEXT_CHARS), "right_context" to snap.substring(c.start + c.from.length),
+                    "outcome" to "accepted", "style" to config.style, "model" to config.modelId(), "app_version" to config.appVersion)
+                write(e); lastEv = e
+            }
+        }
+        val c = changes.maxBy { it.start }
+        // start of the changed word in the counter, after this edit (changes before it shifted it)
+        val shift = changes.filter { it.start < c.start }.sumOf { it.to.length - it.from.length }
+        rewindUndo = RewindUndo(end - (snap.length - c.start) + shift, c.from, c.to, lastEv)
+        if (cur.isEmpty()) setStrip(listOf(c.to, c.from), 0, StripMode.REWIND, undo = 1)
+    }
+
+    /** Undo chip of a rewind: put the original word back, if the text there is unchanged. */
+    private fun revertRewind(ed: Editor) {
+        val u = rewindUndo ?: return
+        rewindUndo = null
+        val cur = composing.toString()
+        val x = pos - (u.start + u.to.length)
+        if (x < cur.length || x > MAX_AFTER) return
+        val xi = x.toInt()
+        val live = ed.textBefore(u.to.length + xi + 1)
+        val L = live.length
+        if (L < u.to.length + xi || live.substring(L - xi - u.to.length, L - xi) != u.to || !live.endsWith(cur)) return
+        val after = live.substring(L - xi)
+        val before = pos
+        ed.beginBatch()
+        if (cur.isNotEmpty()) ed.finishComposing()
+        ed.replaceBefore(u.to.length + xi, u.from + after.dropLast(cur.length))
+        if (cur.isNotEmpty()) ed.setComposing(cur)
+        ed.endBatch()
+        val delta = pos - before
+        for (o in pendings) if (o.anchor > u.start) o.anchor += delta
+        prev = null
+        rewound.add(u.start)
+        u.event?.let { val e = LinkedHashMap(it); e["outcome"] = "undone"; e["ts"] = System.currentTimeMillis(); write(e) }
+        setStrip(emptyList(), -1, StripMode.NONE)
     }
 
     private fun apply(pd: Pending, r: WordResult?) {
@@ -447,6 +563,10 @@ class KeyboardController(
                 last = null
                 prev?.let { pv -> val k = pv.slot.cands.indexOf(pick); if (k >= 0) { pv.idx = k; pv.out = pick } else prev = null }
                 setStrip(emptyList(), -1, StripMode.NONE)
+            }
+            StripMode.REWIND -> {
+                val u = rewindUndo ?: return
+                if (pick == u.from) revertRewind(ed) else setStrip(emptyList(), -1, StripMode.NONE)
             }
             StripMode.NONE -> {}
         }

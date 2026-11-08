@@ -12,6 +12,9 @@ import android.view.inputmethod.InputMethodManager
 import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.BuildConfig
 import dev.mostlime.autocorrect.engine.DecodeParams
+import dev.mostlime.autocorrect.engine.Rewind
+import dev.mostlime.autocorrect.engine.RewindChange
+import dev.mostlime.autocorrect.engine.RewindTarget
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordResult
 import kotlinx.coroutines.Job
@@ -96,6 +99,16 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
             }
         }
 
+        override fun rewind(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) {
+            EngineHolder.scope.launch {
+                val sc = EngineHolder.scorer?.takeIf { !it.step.closed }
+                val ch = if (sc == null) emptyList() else runCatching {
+                    Rewind.check(targets, sc, (EngineHolder.params ?: DEFAULT_PARAMS).lamRe, Rewind.MARGIN)
+                }.getOrDefault(emptyList())
+                main.post { done(ch) }
+            }
+        }
+
         /** queued corrections that haven't started are superseded by the newer word */
         override fun cancelQueued() {
             synchronized(jobs) { jobs.toList() }.forEach { it.cancel() }
@@ -148,7 +161,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         v?.layer = if (policy.numeric) KeyboardLayout.SYMBOLS else KeyboardLayout.LETTERS
         v?.enterLabel = enterLabel(editorInfo)
         ctl.lettersLayer = v?.layer == KeyboardLayout.LETTERS
-        ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME))
+        ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME, rewind = app.prefs.rewind))
         // cheap when loaded; picks up a model / style change or a finished download
         if (!EngineHolder.loading) EngineHolder.preload(this)
         updateStatus(null)

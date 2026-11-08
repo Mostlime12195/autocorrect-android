@@ -10,6 +10,8 @@
     <PreferenceCategory app:title="Autocorrect" app:iconSpaceReserved="false">
         <SwitchPreferenceCompat app:key="autocorrect" app:title="Autocorrect" app:defaultValue="true"
             app:summary="Correct the word on space / punctuation. Backspace right after a correction undoes it." app:iconSpaceReserved="false" />
+ <SwitchPreferenceCompat app:key="rewind" app:title="Fix to/too, their/there… from later words" app:defaultValue="true"
+            app:summary="When the model is very sure, re-check confusable words up to 3 words back" app:iconSpaceReserved="false" />
         <ListPreference app:key="model" app:title="Model" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="battery_saver" app:title="Battery saver" app:defaultValue="false"
             app:summary="Use the small 34M model (lm_block4) instead of m2" app:iconSpaceReserved="false" />

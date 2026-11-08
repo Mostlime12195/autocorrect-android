@@ -8,6 +8,9 @@ import dev.mostlime.autocorrect.engine.DecodeParams
 import dev.mostlime.autocorrect.engine.KeyGeom
 import dev.mostlime.autocorrect.engine.Lexicon
 import dev.mostlime.autocorrect.engine.LmScorer
+import dev.mostlime.autocorrect.engine.Rewind
+import dev.mostlime.autocorrect.engine.RewindChange
+import dev.mostlime.autocorrect.engine.RewindTarget
 import dev.mostlime.autocorrect.engine.SpatialModel
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordResult
@@ -85,6 +88,12 @@ class KeyboardControllerTest {
         override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) { requests.add(req); queue.add(req to done) }
         override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
         override fun cancelQueued() {}
+        val rewinds = ArrayList<Pair<List<RewindTarget>, (List<RewindChange>) -> Unit>>()
+        var rewindLm: LmScorer = lm
+        override fun rewind(targets: List<RewindTarget>, done: (List<RewindChange>) -> Unit) { rewinds.add(targets to done) }
+        fun deliverRewinds() {
+            while (rewinds.isNotEmpty()) { val (t, d) = rewinds.removeAt(0); d(Rewind.check(t, rewindLm, 1.25)) }
+        }
         fun deliver(n: Int = queue.size) {
             repeat(n) {
                 val (req, done) = queue.removeAt(0)
@@ -256,6 +265,44 @@ class KeyboardControllerTest {
         type("so i want ")
         engine.deliver(engine.queue.size)
         assertEquals("so i want ", ed.text.toString())
+    }
+
+    /** LM that only knows "to the" beats "too the" (the evidence comes after the word) */
+    private val toThe = LmScorer { reqs -> DoubleArray(reqs.size) { i -> val c = reqs[i].cont; if ("to the" in c && "too the" !in c) -1.0 else if ("too the" in c) -15.0 else -5.0 } }
+
+    @Test fun rewindFixesAConfusableWordFromRightContext() {
+        type("i went too the store ")
+        engine.deliver(engine.queue.size)
+        engine.rewindLm = toThe
+        engine.deliverRewinds()
+        assertTrue(ed.text.toString(), ed.text.endsWith("went to the store "))
+        assertTrue(events.any { it["type"] == "rewind" && it["from"] == "too" && it["to"] == "to" })
+        // undo chip puts it back, and it is never rewound again
+        assertEquals("too", ctl.shown[1])
+        ctl.pickSuggestion(1)
+        assertTrue(ed.text.toString(), ed.text.endsWith("went too the store "))
+        type("now ")
+        engine.deliver(engine.queue.size)
+        engine.deliverRewinds()
+        assertTrue(ed.text.toString(), ed.text.endsWith("went too the store now "))
+    }
+
+    @Test fun rewindNeedsAClearMarginAndUnchangedText() {
+        type("i went too the store ")
+        engine.deliver(engine.queue.size)
+        // weak evidence: no change
+        engine.rewindLm = LmScorer { reqs -> DoubleArray(reqs.size) { i -> if ("to the" in reqs[i].cont) -5.0 else -6.0 } }
+        engine.deliverRewinds()
+        assertTrue(ed.text.toString(), ed.text.endsWith("too the store "))
+    }
+
+    @Test fun rewindRespectsEditsMadeMeanwhile() {
+        type("i went too the store ")
+        engine.deliver(engine.queue.size)
+        type("\b\b\b\b\b\b")                      // the user deleted "store " before the rewind landed
+        engine.rewindLm = toThe
+        engine.deliverRewinds()
+        assertTrue(ed.text.toString(), ed.text.endsWith("too the "))
     }
 
     @Test fun passwordFieldsNeverCorrectOrLog() {

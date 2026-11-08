@@ -313,3 +313,44 @@ class Corrector(
         const val OOV_LOGP = -20.0
     }
 }
+
+/** A word some way back, re-checked with the text typed after it as right context. start = offset in the snapshot. */
+class RewindTarget(val start: Int, val word: String, val left: String, val sep: String, val right: String, val wordsBack: Int)
+
+class RewindChange(val start: Int, val from: String, val to: String, val margin: Double, val wordsBack: Int)
+
+/**
+ * Confusion-set rewind: when the model is very sure, fix a real-word error up to a few words back using the words typed
+ * since (to/too/two, there/their/they're, ...). Only within these fixed sets, only above a high LM margin.
+ */
+object Rewind {
+    val SETS: Map<String, List<String>> = run {
+        val groups = listOf(
+            listOf("to", "too", "two"), listOf("there", "their", "they're"), listOf("your", "you're"), listOf("its", "it's"),
+            listOf("then", "than"), listOf("lose", "loose"), listOf("were", "where", "we're"), listOf("of", "off"), listOf("a", "an"),
+        )
+        val m = HashMap<String, List<String>>()
+        for (g in groups) for (w in g) m[w] = g
+        m
+    }
+    /** LM log-prob margin (x lam_r) the alternative must win by. Conservative by default. */
+    const val MARGIN = 6.0
+    const val MAX_WORDS_BACK = 3
+
+    fun isTarget(word: String) = word.lowercase() in SETS
+
+    fun check(targets: List<RewindTarget>, scorer: LmScorer, lam: Double, margin: Double = MARGIN): List<RewindChange> {
+        val out = ArrayList<RewindChange>()
+        for (t in targets) {
+            val group = SETS[t.word.lowercase()] ?: continue
+            val cands = group.map { applyCase(it, t.word) }
+            val cur = group.indexOf(t.word.lowercase())
+            val lp = scorer.score(cands.map { LmReq(t.left, t.sep + it + t.right) })
+            var best = cur
+            for (i in lp.indices) if (lp[i] > lp[best]) best = i
+            val m = lam * (lp[best] - lp[cur])
+            if (best != cur && m >= margin) out.add(RewindChange(t.start, t.word, cands[best], m, t.wordsBack))
+        }
+        return out
+    }
+}
