@@ -7,8 +7,17 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
 - Keyboard: shift / caps lock (double-tap shift), backspace with repeat, numbers + two symbol layers, space, comma,
   period, enter that follows the field's action (Go / Search / Send / Next / Done / newline). Long-press ?123 opens the
   keyboard switcher.
-- Autocorrect on space / punctuation / enter, with the text before the cursor as the LM's left context. Backspace right
-  after a correction restores what you typed (and keeps it).
+- Autocorrect on space / punctuation / enter, with the text before the cursor as the LM's left context (up to 400
+  characters, clipped to the last 64 tokens like the eval). Backspace right after a correction restores what you typed
+  (and keeps it).
+- Never waits for the model: the word is committed as typed and the correction is applied when it's ready, in one batch
+  edit, only if the text before the cursor is still exactly what was typed (plus the word you're composing now);
+  otherwise it's dropped. Enter / Send waits up to 400 ms for a pending correction. The state machine is
+  `ime/KeyboardController.kt`, tested with a fake editor and a slow engine (`KeyboardControllerTest`).
+- Candidate generation v2 (splits "inaminute" → "in a minute", space-bar misses, merges "some thing" → "something",
+  apostrophes "im" → "i'm", g-drops), with the per-kind penalties from `web/site/params_v2.json`. camelCase tokens are
+  never split or merged. The **formal** style also adds sentence capitals, i → I and punctuation after the previous
+  word (end-of-message punctuation is not done yet).
 - Suggestion strip: top 3. While typing it shows cheap suggestions (spatial + word frequency); after a correction it
   shows the alternatives, and tapping one replaces the corrected word.
 - Models (downloaded on first run, see below): m2 106M int4 (default), m2 106M int8, Block AttnRes 34M (battery saver).
@@ -113,7 +122,9 @@ it (`app/build.gradle.kts`), so every build has the same certificate and install
 variables (local builds) the debug key is used. Backup of the keystore: `~/.config/autocorrect-android/` on the dev VPS
 (mode 600). Losing it means the next build can't update an installed app (uninstall first).
 
-Local builds: `./gradlew :app:assembleDebug` with an Android SDK. The engine is plain Kotlin/JVM and builds without
+Local builds: `./gradlew :app:assembleDebug` with an Android SDK. On the arm64 dev VPS the x86 aapt2 runs under
+qemu-user: `-Pandroid.aapt2FromMavenOverride=$HOME/.cache/aapt2x86/bin/aapt2` (a wrapper around
+`qemu-x86_64 -L /usr/x86_64-linux-gnu aapt2`). The engine is plain Kotlin/JVM and builds without
 one: `ENGINE_ONLY=1 ./gradlew :engine:test` (set `AC_MODEL_DIR` to a folder with `lm_block4.step.int8.ort` for the
 ORT tests).
 
@@ -121,4 +132,6 @@ ORT tests).
 
 - `engine/`: pure Kotlin port (tokenizer, lexicon, spatial model, candidate generators v1 / v2, decode, word-level
   corrector, ORT step-graph scorer with prefix caching). Compile-only dependency on the ORT Java API.
-- `app/`: the IME (`ime/`), model download (`model/`), local log + uploader (`log/`), settings (`ui/`).
+- `app/`: the IME (`ime/`: service glue, `KeyboardController` text state machine, view, layout, field policy,
+  engine holder), model download (`model/`), local log + uploader (`log/`), settings (`ui/`). The keyboard service runs
+  in its own process (`:ime`), so the settings screen's test box doesn't share a main thread with it.

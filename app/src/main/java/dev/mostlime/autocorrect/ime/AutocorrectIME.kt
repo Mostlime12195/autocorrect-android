@@ -45,11 +45,13 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         override fun deleteBefore(n: Int) { ic?.deleteSurroundingText(n, 0) }
         override fun beginBatch() { ic?.beginBatchEdit() }
         override fun endBatch() { ic?.endBatchEdit() }
-        override fun deleteKey() {
-            val c = ic ?: return
-            if (!c.getSelectedText(0).isNullOrEmpty()) c.commitText("", 1)
-            else if (c.getTextBeforeCursor(1, 0).isNullOrEmpty()) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
-            else c.deleteSurroundingTextInCodePoints(1, 0)
+        override fun deleteKey(): Int {
+            val c = ic ?: return -1
+            if (!c.getSelectedText(0).isNullOrEmpty()) { c.commitText("", 1); return -1 }
+            val b = c.getTextBeforeCursor(2, 0)?.toString() ?: ""
+            if (b.isEmpty()) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return -1 }
+            c.deleteSurroundingTextInCodePoints(1, 0)
+            return if (b.length == 2 && Character.isSurrogatePair(b[0], b[1])) 2 else 1
         }
         override fun enter() { sendKeyChar('\n') }
         override fun capsMode(): Boolean {
@@ -212,6 +214,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                     append(when { r.cheap -> "cheap"; r.skipped -> "skip"; else -> "LM ${r.lmMs.roundToInt()}ms ${r.nScored}/${r.nCands} ctx ${r.ctxTokens}t" })
                     r.recheck?.let { append(" · re-check") }
                     r.merge?.let { append(" · merge") }
+                    // top candidates with final scores, for screenshots of misses
+                    append(" · ").append(r.slot.cands.indices.sortedByDescending { r.scores[it] }.take(3)
+                        .joinToString("  ") { "${r.slot.cands[it]} ${"%.1f".format(r.scores[it])}" })
                 }
                 val st = EngineHolder.corrector?.stats
                 if (st != null && st.words > 0) append(" · skip ${(100 * st.lmSkipped / st.words)}%")

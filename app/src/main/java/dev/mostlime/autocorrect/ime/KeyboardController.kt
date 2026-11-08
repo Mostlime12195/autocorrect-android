@@ -19,8 +19,8 @@ interface Editor {
     fun deleteBefore(n: Int)
     fun beginBatch()
     fun endBatch()
-    /** backspace when there's nothing we know about before the cursor (selection or empty field) */
-    fun deleteKey()
+    /** backspace with no composing word: -> chars removed before the cursor, or -1 if unknown (selection, key event) */
+    fun deleteKey(): Int
     /** enter: editor action or newline */
     fun enter()
     fun capsMode(): Boolean
@@ -98,13 +98,38 @@ class KeyboardController(
     private class Prev(val slot: Slot, var idx: Int, var out: String, val lmScored: Boolean, val typed: String, val touches: List<Touch>)
     private var prev: Prev? = null
 
-    /** A correction in flight. */
+    /** A correction in flight. anchor = our cursor position counter right after the word + separator were committed. */
     private class Pending(
         val id: Int, val typed: String, val touches: List<Touch>, val sepText: String, val before: String, val sep: String,
-        val prevOut: String?, val prevSep: String, val prevTyped: Prev?,
-    ) { var done = false }
-    private var pending: Pending? = null
+        val prevOut: String?, val prevSep: String, var anchor: Long,
+    ) { var done = false; var valid = true }
+    private val pendings = ArrayList<Pending>()
     private var nextId = 1
+
+    /**
+     * Cursor position counter: every edit goes through [tracked], so for each pending correction we know how many
+     * characters were typed after its word (they're kept and re-inserted when the correction lands late).
+     * Edits we can't size (enter, deleting a selection, the user moving the cursor) invalidate the pending ones.
+     */
+    private var pos = 0L
+    private var compLen = 0
+    private fun invalidatePendings() { for (p in pendings) p.valid = false }
+
+    private inner class Tracked(val e: Editor) : Editor {
+        override fun textBefore(n: Int) = e.textBefore(n)
+        override fun hasSelection() = e.hasSelection()
+        override fun setComposing(text: String) { e.setComposing(text); pos += text.length - compLen; compLen = text.length }
+        override fun finishComposing() { e.finishComposing(); compLen = 0 }
+        override fun commit(text: String) { e.commit(text); pos += text.length - compLen; compLen = 0 }
+        override fun deleteBefore(n: Int) { e.deleteBefore(n); pos -= n }
+        override fun beginBatch() = e.beginBatch()
+        override fun endBatch() = e.endBatch()
+        override fun deleteKey(): Int { val n = e.deleteKey(); if (n < 0) invalidatePendings() else pos -= n; return n }
+        override fun enter() { e.enter(); invalidatePendings() }
+        override fun capsMode() = e.capsMode()
+    }
+
+    private fun ed(): Editor? = editor()?.let { Tracked(it) }
 
     private var holding = false
     private val held = ArrayList<() -> Unit>()
@@ -125,7 +150,7 @@ class KeyboardController(
     fun startInput(cfg: ControllerConfig) {
         flushLast()
         config = cfg
-        resetWord(); last = null; prev = null; pending = null
+        resetWord(); last = null; prev = null; pendings.clear(); compLen = 0
         releaseHold()
         shift = Shift.OFF
         autoShift()
@@ -135,16 +160,17 @@ class KeyboardController(
     fun finishInput() {
         flushLast()
         releaseHold()
-        pending = null
-        resetWord()
+        pendings.clear()
+        resetWord(); compLen = 0
     }
 
     /** The editor reported a selection change: make sure the composing word is still right before the cursor. */
     fun selectionChanged() {
         if (holding || composing.isEmpty()) return
-        val ed = editor() ?: return
+        val ed = ed() ?: return
         if (ed.hasSelection() || !ed.textBefore(composing.length + 1).endsWith(composing)) {
             ed.finishComposing()
+            invalidatePendings()
             resetWord(); last = null; prev = null
             setStrip(emptyList(), -1, StripMode.NONE)
         }
@@ -153,7 +179,7 @@ class KeyboardController(
     // ------------------------------------------------------------------ keys
     fun key(k: KeyDef, touch: Touch) {
         if (holding) { held.add { key(k, touch) }; return }
-        val ed = editor() ?: return
+        val ed = ed() ?: return
         when (k.type) {
             KeyType.CHAR -> {
                 var c = k.text
@@ -178,12 +204,11 @@ class KeyboardController(
             KeyType.SPACE -> if (composing.isNotEmpty()) finishWord(ed, " ", trigger = true) else { flushLast(); ed.commit(" "); autoShift() }
             KeyType.ENTER -> {
                 if (composing.isNotEmpty()) finishWord(ed, "", trigger = true)
-                val p = pending
-                if (p != null && !p.done) {
-                    // hold enter (and later keys) until the correction lands or the hold times out
+                if (pendings.any { it.valid }) {
+                    // hold enter (and later keys) until the corrections land or the hold times out
                     holding = true
                     holdToken = timer.post(ENTER_HOLD_MS) { releaseHold() }
-                    held.add { flushLast(); editor()?.enter(); autoShift() }
+                    held.add { flushLast(); ed()?.enter(); autoShift() }
                 } else { flushLast(); ed.enter(); autoShift() }
             }
             KeyType.BACKSPACE -> backspace(ed)
@@ -268,9 +293,10 @@ class KeyboardController(
             PrevWord(p.slot, p.idx, leftp, sepp, p.lmScored)
         } else null
         val id = nextId++
-        val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, p.takeIf { prevWord != null })
-        pending = pd
-        engine.cancelQueued()
+        val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, pos)
+        pendings.add(pd)
+        // keep at most MAX_PENDING corrections in flight (slow model + fast typing): the oldest gives way
+        while (pendings.size > MAX_PENDING) { val old = pendings.removeAt(0); old.done = true; stats.dropped++ }
         val req = CorrectionRequest(id, WordInput(typed, tch, left, sep), prevWord, if (prevWord != null && p != null) MergeInput(p.typed, p.touches) else null,
             formal = cfg.style == "formal")
         engine.correct(req) { r -> onCorrection(pd, r) }
@@ -282,20 +308,18 @@ class KeyboardController(
     private fun onCorrection(pd: Pending, r: WordResult?) {
         if (pd.done) return
         pd.done = true
-        val latest = pending === pd
-        if (latest) pending = null
+        pendings.remove(pd)
         try {
-            // a newer word end already happened: this result is stale by definition
-            if (latest) apply(pd, r) else { stats.dropped++; ui.onResult(r) }
+            if (pd.valid) apply(pd, r) else { stats.dropped++; ui.onResult(r) }
         } finally {
-            if (holding && pending == null) releaseHold()
+            if (holding && pendings.none { it.valid }) releaseHold()
         }
     }
 
     private fun apply(pd: Pending, r: WordResult?) {
         ui.onResult(r)
         if (r == null) return
-        val ed = editor() ?: return
+        val ed = ed() ?: return
         val mg = r.merge?.takeIf { pd.prevOut != null }
         val rc = r.recheck?.takeIf { mg == null && pd.prevOut != null }
         // new text for the previous word: re-check flip and/or formal punctuation
@@ -308,33 +332,44 @@ class KeyboardController(
             stats.unchanged++
             if (ev != null) writePerf(r)
             // the word stands as typed: it becomes the previous word for the next re-check
-            prev = Prev(r.slot, r.chosen, pd.typed, r.lmScored, pd.typed, pd.touches)
+            if (pendings.none { it.anchor > pd.anchor }) prev = Prev(r.slot, r.chosen, pd.typed, r.lmScored, pd.typed, pd.touches)
             return
         }
         val prefixOld = if (mg != null || prevNew != null) pd.prevOut + pd.prevSep else ""
-        val oldSpan = prefixOld + pd.typed + pd.sepText + cur
-        val live = ed.textBefore(oldSpan.length + 1)
-        if (!live.endsWith(oldSpan) || ed.hasSelection()) {
+        val oldCore = prefixOld + pd.typed + pd.sepText
+        // text typed since this word (kept): X chars before the cursor, ending with the composing word
+        val x = pos - pd.anchor
+        if (x < cur.length || x > MAX_AFTER) { stats.dropped++; ev?.let { it["outcome"] = "dropped_stale"; write(it) }; return }
+        val xi = x.toInt()
+        val live = ed.textBefore(oldCore.length + xi + 1)
+        val L = live.length
+        if (L < oldCore.length + xi || live.substring(L - xi - oldCore.length, L - xi) != oldCore || ed.hasSelection() || !live.endsWith(cur)) {
             stats.dropped++
             ev?.let { it["outcome"] = "dropped_stale"; write(it) }
             return
         }
+        val after = live.substring(L - xi)
         val newPrefix = if (prevNew != null) prevNew + pd.prevSep else ""
-        val newSpan = newPrefix + out + pd.sepText
+        val newCore = newPrefix + out + pd.sepText
+        val before = pos
         ed.beginBatch()
         if (cur.isNotEmpty()) ed.finishComposing()
-        ed.deleteBefore(oldSpan.length)
-        ed.commit(newSpan)
+        ed.deleteBefore(oldCore.length + xi)
+        ed.commit(newCore + after.dropLast(cur.length))
         if (cur.isNotEmpty()) ed.setComposing(cur)
         ed.endBatch()
+        // later words moved by the length change
+        val delta = pos - before
+        for (o in pendings) if (o.anchor > pd.anchor) o.anchor += delta
         stats.applied++
         if (rc != null) ev?.set("recheck", mapOf("from" to rc.from, "to" to rc.to))
         if (prevNew != null && rc?.to != prevNew) ev?.set("punct", mapOf("from" to pd.prevOut, "to" to prevNew))
         if (mg != null) ev?.let { it["merge"] = mapOf("from" to pd.prevOut + pd.prevSep + pd.typed, "to" to mg.to); it["final"] = mg.to }
         val undoPrefix = if (mg != null) pd.prevOut + pd.prevSep else ""
-        last = Last(pd.typed, pd.touches, out, pd.sepText, r, ev, undoPrefix)
-        prev = if (mg != null) null else Prev(r.slot, r.chosen, out, r.lmScored, pd.typed, pd.touches)
-        if (cur.isEmpty() && out != pd.typed) {
+        val newest = pendings.none { it.anchor > pd.anchor }
+        if (xi == 0) last = Last(pd.typed, pd.touches, out, pd.sepText, r, ev, undoPrefix) else ev?.let { write(it) }
+        prev = if (mg != null || !newest || xi != cur.length) null else Prev(r.slot, r.chosen, out, r.lmScored, pd.typed, pd.touches)
+        if (xi == 0 && out != pd.typed) {
             val ranked = r.ranked(3).toMutableList()
             if (pd.typed !in ranked) { if (ranked.size >= 3) ranked[2] = pd.typed else ranked.add(pd.typed) }
             setStrip(ranked, ranked.indexOf(out), StripMode.LAST_WORD)
@@ -343,7 +378,7 @@ class KeyboardController(
 
     fun pickSuggestion(i: Int) {
         if (holding) { held.add { pickSuggestion(i) }; return }
-        val ed = editor() ?: return
+        val ed = ed() ?: return
         val pick = shown.getOrNull(i) ?: return
         when (stripMode) {
             StripMode.TYPING -> {
@@ -459,6 +494,8 @@ class KeyboardController(
         const val LOG_CONTEXT_CHARS = 120
         const val LOG_CANDS = 8
         const val ENTER_HOLD_MS = 400L
+        const val MAX_PENDING = 3
+        const val MAX_AFTER = 120L
         const val SUGGEST_DEBOUNCE_MS = 60L
         const val DOUBLE_TAP_MS = 350L
         val WORD_RE = Regex("[A-Za-z]+(?:'[A-Za-z]+)*'?")

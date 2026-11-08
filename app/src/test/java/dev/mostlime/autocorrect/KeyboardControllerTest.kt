@@ -55,7 +55,7 @@ class KeyboardControllerTest {
         }
         override fun beginBatch() {}
         override fun endBatch() {}
-        override fun deleteKey() { if (text.isNotEmpty()) text.setLength(text.length - 1); if (cs > text.length) cs = -1 }
+        override fun deleteKey(): Int { if (text.isEmpty()) return 0; text.setLength(text.length - 1); if (cs > text.length) cs = -1; return 1 }
         override fun enter() { cs = -1; text.append('\n') }
         override fun capsMode() = false
     }
@@ -66,7 +66,8 @@ class KeyboardControllerTest {
             val gen = CandidateGenerator(Lexicon(f.readText()), SpatialModel())
             Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = doubleArrayOf(2.5, 7.5)))
         }
-        val GOOD = setOf("the", "quick", "brown", "fox", "one", "more", "question", "that", "be", "only", "i", "have", "is", "it")
+        val GOOD = setOf("the", "quick", "brown", "fox", "one", "more", "question", "that", "be", "only", "i", "have", "is", "it",
+            "keyboard", "guess", "fixed", "a", "lot", "contractions", "are")
         /** LM that likes common words in GOOD and dislikes everything else (summed over the continuation's words) */
         val lm = LmScorer { reqs -> DoubleArray(reqs.size) { i -> reqs[i].cont.trim().split(Regex("\\s+")).sumOf { w -> if (w.lowercase() in GOOD) -2.0 else -14.0 } } }
         val P = DecodeParams(lam = 1.25, bias = 0.0, margin = 0.0, lamR = 1.25)
@@ -132,14 +133,36 @@ class KeyboardControllerTest {
         assertEquals("the quick ", ed.text.toString())
     }
 
-    @Test fun staleResultsAreDroppedNotDuplicated() {
+    @Test fun lateResultsStillApplyWithoutDuplicates() {
         type("teh tha ")
         engine.deliver(2)
-        // "teh" was superseded by the next word end: dropped, never written twice; "tha" -> "that" applies
-        val t = ed.text.toString()
-        assertTrue(t, t == "teh that " || t == "the that ")
-        assertEquals(1, Regex("th").findAll(t.substringAfter(' ')).count())
-        assertEquals(ctl.stats.dropped + ctl.stats.applied + ctl.stats.unchanged, 2)
+        // both land after later typing: each replaces exactly its own word
+        assertEquals("the that ", ed.text.toString())
+        assertEquals(2, ctl.stats.applied)
+    }
+
+    @Test fun wordFollowedByCommaThenMoreTyping() {
+        // "keybiard," then " I gu" typed before the slow result arrives (the v0.1.13 miss)
+        type("this is a usable keybiard, I gu")
+        engine.deliver(engine.queue.size)
+        assertTrue(ed.text.toString(), ed.text.endsWith("usable keyboard, I gu"))
+        assertEquals("gu", ed.composingText)
+        type("ess ")
+        engine.deliver(engine.queue.size)
+        assertTrue(ed.text.toString(), ed.text.endsWith("keyboard, I guess "))
+    }
+
+    @Test fun fastTypingAcrossSeveralWords() {
+        type("contractions are fized a lot ")
+        engine.deliver(engine.queue.size)
+        assertEquals("contractions are fixed a lot ", ed.text.toString())
+    }
+
+    @Test fun backspaceAfterWordKeepsPendingCorrection() {
+        type("teh  ")          // double space, then fix it before the result arrives
+        type("\b")
+        engine.deliver(engine.queue.size)
+        assertEquals("the ", ed.text.toString())
     }
 
     @Test fun composingSurvivesSelectionSpam() {
