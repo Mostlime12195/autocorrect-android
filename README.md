@@ -52,6 +52,18 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
 - In-app updates: `latest.json` on the Nest mirror (`scripts/publish_apk.sh <tag>` after every release) is checked when
   settings open and every 6 h; a notification and a settings banner offer the update, the APK is downloaded (auto on
   Wi-Fi unless turned off), SHA-256-checked and installed with a PackageInstaller session.
+- Settings in sub-screens: Typing, Correction, Dictionary, Appearance, Model, Privacy and data, Updates, About (the
+  setup card stays on top until setup is done). Appearance: theme (system / light / dark), theme color (Material You
+  on Android 12+ by default, the original green before, 10 swatches or a custom HSV / hex color; text on the accent is
+  black or white by contrast), a background image (Photo Picker, stored at screen width, cropped to the keyboard,
+  darken / blur / key-opacity sliders, removed by delete-my-data), keyboard height (108% default), key gap, corner
+  radius, hint symbols on / off and size. Layout: QWERTY / QWERTZ / AZERTY / Dvorak / Colemak (the spatial model's
+  letter centres and the swipe templates follow the layout), number row, comma and emoji keys, cursor-key row,
+  one-handed mode (80% width, tap the empty side to switch), split keys in landscape, custom long-press entries
+  ("e: € :)" per line, multi-character entries go in as text). Model: the Lite (34M) model is the default on low-RAM
+  phones (< 4.5 GB or flagged low-RAM) and on phones with only small cores (A53 / A55 class).
+- Suggest-only keeps every flagged word underlined (SuggestionSpan); in apps that ignore it, putting the cursor on or
+  next to a flagged word shows its fixes in the strip (offsets are tracked per field and re-found when text moves).
 - Suggestion strip: top 3. While typing it shows cheap suggestions (spatial + word frequency); after a correction it
   shows the alternatives, and tapping one replaces the corrected word.
 - Models (downloaded on first run, see below): m2 style 106M int4 (default), m2 style int8, m2 106M int4 / int8, Block
