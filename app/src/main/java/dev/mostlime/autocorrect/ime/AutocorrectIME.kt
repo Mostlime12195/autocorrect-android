@@ -93,7 +93,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     }
 
     private val ui = object : ControllerUi {
-        override fun showStrip(words: List<String>, bold: Int) { kv?.setSuggestions(words, bold) }
+        override fun showStrip(words: List<String>, bold: Int, undo: Int) { kv?.setSuggestions(words, bold, undo) }
+        override fun onApplied() { kv?.flash() }
         override fun setShift(shift: Shift) { kv?.shift = shift }
         override fun onResult(r: WordResult?) {
             // timing only, never the text
@@ -183,6 +184,13 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onSuggestion(index: Int) = ctl.pickSuggestion(index)
+
+    override fun onAlternate(text: String) = ctl.replaceLastChar(text)
+
+    override fun onSettings() {
+        startActivity(android.content.Intent(this, dev.mostlime.autocorrect.ui.SettingsActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 
     override fun onSwitchIme() {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()

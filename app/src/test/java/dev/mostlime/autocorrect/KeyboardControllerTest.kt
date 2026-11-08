@@ -110,7 +110,7 @@ class KeyboardControllerTest {
     private val timer = ManualTimer()
     private val events = ArrayList<Map<String, Any?>>()
     private val ctl = KeyboardController({ ed }, engine, object : ControllerUi {
-        override fun showStrip(words: List<String>, bold: Int) {}
+        override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
         override fun setShift(shift: Shift) {}
         override fun onResult(r: WordResult?) {}
     }, timer) { events.add(it) }.apply {
@@ -235,7 +235,7 @@ class KeyboardControllerTest {
         }
         val t2 = ManualTimer(fastExpires = false)
         val c2 = KeyboardController({ ed2 }, quick, object : ControllerUi {
-            override fun showStrip(words: List<String>, bold: Int) {}
+            override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
             override fun setShift(shift: Shift) {}
             override fun onResult(r: WordResult?) {}
         }, t2) {}.apply { startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "t" }, "t")) }

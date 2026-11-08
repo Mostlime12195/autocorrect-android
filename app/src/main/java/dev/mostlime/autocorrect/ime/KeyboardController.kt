@@ -35,7 +35,10 @@ interface CorrectionEngine {
 }
 
 interface ControllerUi {
-    fun showStrip(words: List<String>, bold: Int)
+    /** undo = index of the word as typed after a correction (drawn as an undo chip), -1 if none */
+    fun showStrip(words: List<String>, bold: Int, undo: Int = -1)
+    /** a correction just changed the text (micro-interaction hook) */
+    fun onApplied() {}
     fun setShift(shift: Shift)
     fun onResult(r: WordResult?)
 }
@@ -101,7 +104,7 @@ class KeyboardController(
 
     /** A correction in flight. anchor = our cursor position counter right after the word + separator were committed. */
     private class Pending(
-        val id: Int, val typed: String, val touches: List<Touch>, val sepText: String, val before: String, val sep: String,
+        val id: Int, val typed: String, val touches: List<Touch>, var sepText: String, val before: String, val sep: String,
         val prevOut: String?, val prevSep: String, var anchor: Long,
     ) { var done = false; var valid = true; var uncommitted = false }
     private val pendings = ArrayList<Pending>()
@@ -189,7 +192,7 @@ class KeyboardController(
                 var c = k.text
                 if (shift != Shift.OFF) c = c.uppercase()
                 val ch = c[0]
-                val letter = ch in 'a'..'z' || ch in 'A'..'Z'
+                val letter = ch in 'a'..'z' || ch in 'A'..'Z' || (Character.isLetter(ch) && composing.isNotEmpty())
                 if (letter || (ch == '\'' && composing.isNotEmpty())) {
                     flushLast()
                     if (stripMode == StripMode.LAST_WORD) setStrip(emptyList(), -1, StripMode.NONE)
@@ -391,6 +394,7 @@ class KeyboardController(
         val delta = pos - before
         for (o in pendings) if (o.anchor > pd.anchor) o.anchor += delta
         stats.applied++
+        ui.onApplied()
         if (rc != null) ev?.set("recheck", mapOf("from" to rc.from, "to" to rc.to))
         if (prevNew != null && rc?.to != prevNew) ev?.set("punct", mapOf("from" to pd.prevOut, "to" to prevNew))
         if (mg != null) ev?.let { it["merge"] = mapOf("from" to pd.prevOut + pd.prevSep + pd.typed, "to" to mg.to); it["final"] = mg.to }
@@ -401,7 +405,7 @@ class KeyboardController(
         if (xi == 0 && out != pd.typed) {
             val ranked = r.ranked(3).toMutableList()
             if (pd.typed !in ranked) { if (ranked.size >= 3) ranked[2] = pd.typed else ranked.add(pd.typed) }
-            setStrip(ranked, ranked.indexOf(out), StripMode.LAST_WORD)
+            setStrip(ranked, ranked.indexOf(out), StripMode.LAST_WORD, undo = ranked.indexOf(pd.typed))
         }
     }
 
@@ -437,13 +441,33 @@ class KeyboardController(
                 ed.commit(pick + l.sepText)
                 ed.endBatch()
                 val e = l.event ?: if (!config.policy.sensitive && l.result != null) baseEvent("autocorrect", l.typed, l.touches) else null
-                e?.let { it["outcome"] = "strip_pick"; it["final"] = pick; write(it) }
+                e?.let { it["outcome"] = if (pick == l.typed) "undone" else "strip_pick"; it["final"] = pick; write(it) }
                 last = null
                 prev?.let { pv -> val k = pv.slot.cands.indexOf(pick); if (k >= 0) { pv.idx = k; pv.out = pick } else prev = null }
                 setStrip(emptyList(), -1, StripMode.NONE)
             }
             StripMode.NONE -> {}
         }
+    }
+
+    /** Long-press alternate: replaces the character the press already typed (é for e, 1 for q, ? for .). */
+    fun replaceLastChar(alt0: String) {
+        if (holding) { held.add { replaceLastChar(alt0) }; return }
+        val ed = ed() ?: return
+        if (composing.isNotEmpty()) {
+            val alt = if (composing.last().isUpperCase()) alt0.uppercase() else alt0
+            composing.setLength(composing.length - 1); composing.append(alt)
+            ed.setComposing(composing.toString())
+            scheduleSuggest()
+            return
+        }
+        // the character ended a word: swap the separator of that word's pending correction too
+        val pd = pendings.lastOrNull()
+        if (pd != null && pd.uncommitted && pd.sepText.length == 1) { pd.sepText = alt0; return }
+        if (ed.textBefore(1).isEmpty()) return
+        ed.beginBatch(); ed.deleteBefore(1); ed.commit(alt0); ed.endBatch()
+        if (pd != null && pd.valid && pd.anchor == pos && pd.sepText.length == 1) pd.sepText = alt0
+        autoShift()
     }
 
     // ------------------------------------------------------------------ strip while typing (cheap path, debounced)
@@ -465,9 +489,9 @@ class KeyboardController(
         suggestToken = null
     }
 
-    private fun setStrip(s: List<String>, bold: Int, mode: StripMode) {
+    private fun setStrip(s: List<String>, bold: Int, mode: StripMode, undo: Int = -1) {
         shown = s; stripMode = mode
-        ui.showStrip(s, bold)
+        ui.showStrip(s, bold, undo)
     }
 
     // ------------------------------------------------------------------ helpers

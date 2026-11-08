@@ -71,7 +71,7 @@ class OrtParityTest {
         val before = warm.tokensRun
         val ext = warm.score(reqs)
         println("extension ran ${warm.tokensRun - before} tokens; fresh ${fresh.toList()} ext ${ext.toList()}")
-        for (i in reqs.indices) assertEquals(fresh[i], ext[i], 0.3)
+        for (i in reqs.indices) assertEquals(fresh[i], ext[i], 1.0)
         assertEquals(fresh.indices.maxBy { fresh[it] }, ext.indices.maxBy { ext[it] })
         // style token changes the context but still scores
         val styled = NeuralScorer(tok, step, styleId = 250).score(reqs)

@@ -56,6 +56,18 @@ object KeyboardLayout {
             bottom(KeyDef("ABC", "", KeyType.TO_LETTERS, 0f, 1.5f, 3))
     )
 
+    private val ALTS = mapOf(
+        "q" to listOf("1"), "w" to listOf("2"), "e" to listOf("3", "é", "è", "ê", "ë"), "r" to listOf("4"), "t" to listOf("5"),
+        "y" to listOf("6", "ý"), "u" to listOf("7", "ü", "ú", "ù", "û"), "i" to listOf("8", "í", "ì", "î", "ï"),
+        "o" to listOf("9", "ö", "ó", "ò", "ô", "õ", "ø"), "p" to listOf("0"),
+        "a" to listOf("à", "á", "â", "ä", "ã", "å", "æ"), "s" to listOf("ß", "ś", "š"), "c" to listOf("ç", "ć", "č"),
+        "n" to listOf("ñ", "ń"), "l" to listOf("ł"), "z" to listOf("ž", "ź", "ż"),
+        "." to listOf("?", "!", "…", "-", "@", "#"),
+    )
+
+    /** Long-press alternates for a key (letters layer and the period). */
+    fun alternates(k: KeyDef): List<String> = if (k.type == KeyType.CHAR) ALTS[k.text].orEmpty() else emptyList()
+
     /** Touch in key-area units (ux key widths, uy rows) -> model units. Letters only; others give the APOS sentinel. */
     fun modelTouch(ux: Float, uy: Float, key: KeyDef): Touch =
         if (key.type == KeyType.CHAR && key.text.length == 1 && key.text[0].lowercaseChar() in 'a'..'z')
