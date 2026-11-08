@@ -63,6 +63,9 @@ class SettingsActivity : AppCompatActivity() {
                 DownloadWorker.start(requireContext(), app.store.activeSpec().id); true
             }
             findPreference<Preference>("export")!!.setOnPreferenceClickListener { export(); true }
+            findPreference<Preference>("stats_reset")!!.setOnPreferenceClickListener {
+                app.prefs.statsResetAt = System.currentTimeMillis(); refresh(); true
+            }
             findPreference<Preference>("clear")!!.setOnPreferenceClickListener {
                 AlertDialog.Builder(requireContext()).setTitle("Clear local data?")
                     .setMessage("Deletes the correction log stored on this phone. Already uploaded data is not affected.")
@@ -140,7 +143,7 @@ class SettingsActivity : AppCompatActivity() {
                 st?.summary = "${spec.label}: not downloaded (${spec.downloadBytes / 1_000_000} MB). Tap to download."
             }
             lifecycleScope.launch {
-                val st = withContext(Dispatchers.IO) { LogStats.compute(app.events.file) }
+                val st = withContext(Dispatchers.IO) { LogStats.compute(app.events.file, BuildConfig.VERSION_NAME, app.prefs.statsResetAt) }
                 findPreference<Preference>("stats")?.summary = st
             }
             lifecycleScope.launch {

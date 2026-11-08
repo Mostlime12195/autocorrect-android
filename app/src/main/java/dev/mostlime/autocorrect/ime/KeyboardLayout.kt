@@ -51,7 +51,7 @@ object KeyboardLayout {
 
     val SYMBOLS2 = Layer(
         row("~`|•√π÷×¶∆", 0, 0f) + row("£¢€¥^°={}\\", 1, 0f) +
-            listOf(KeyDef("?123", "", KeyType.TO_SYMBOLS, 0f, 1.5f, 2)) + row("%©®™✓[]", 2, 1.5f) +
+            listOf(KeyDef("?123", "", KeyType.TO_SYMBOLS, 0f, 1.5f, 2)) + row("%<>©®[]", 2, 1.5f) +
             listOf(KeyDef("⌫", "", KeyType.BACKSPACE, 8.5f, 1.5f, 2)) +
             bottom(KeyDef("ABC", "", KeyType.TO_LETTERS, 0f, 1.5f, 3))
     )

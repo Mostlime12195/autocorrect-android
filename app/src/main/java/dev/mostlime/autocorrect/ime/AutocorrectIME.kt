@@ -144,6 +144,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         val policy = FieldPolicy.of(editorInfo)
         val v = kv
         v?.haptics = app.prefs.haptics
+        v?.hapticStrength = app.prefs.hapticStrength
         v?.layer = if (policy.numeric) KeyboardLayout.SYMBOLS else KeyboardLayout.LETTERS
         v?.enterLabel = enterLabel(editorInfo)
         ctl.lettersLayer = v?.layer == KeyboardLayout.LETTERS

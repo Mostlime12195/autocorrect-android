@@ -27,6 +27,10 @@ class Prefs(private val ctx: Context) {
     val autocorrect get() = sp.getBoolean(AUTOCORRECT, true)
     val debugOverlay get() = sp.getBoolean(DEBUG, false)
     val haptics get() = sp.getBoolean(HAPTICS, true)
+    val hapticStrength get() = (sp.getString(HAPTIC_STRENGTH, "1") ?: "1").toIntOrNull() ?: 1
+    var statsResetAt: Long
+        get() = sp.getLong(STATS_RESET, 0L)
+        set(v) = sp.edit().putLong(STATS_RESET, v).apply()
     val share get() = sp.getBoolean(SHARE, false)
     val wifiOnly get() = sp.getBoolean(WIFI_ONLY, true)
     val uploadUrl get() = (sp.getString(UPLOAD_URL, null) ?: "").ifBlank { DEFAULT_UPLOAD_URL }
@@ -47,6 +51,8 @@ class Prefs(private val ctx: Context) {
         const val AUTOCORRECT = "autocorrect"
         const val DEBUG = "debug_overlay"
         const val HAPTICS = "haptics"
+        const val HAPTIC_STRENGTH = "haptic_strength"
+        const val STATS_RESET = "stats_reset_at"
         const val SHARE = "share_data"
         const val WIFI_ONLY = "upload_wifi_only"
         const val UPLOAD_URL = "upload_url"

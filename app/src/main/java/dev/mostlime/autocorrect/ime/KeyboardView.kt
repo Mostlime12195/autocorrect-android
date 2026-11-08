@@ -12,6 +12,9 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
@@ -66,6 +69,38 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     var enterLabel = "⏎"
         set(v) { field = v; invalidate() }
     var haptics = true
+    /** 0 light, 1 medium, 2 strong */
+    var hapticStrength = 1
+
+    /**
+     * Key vibration through the Vibrator service. performHapticFeedback(KEYBOARD_TAP) follows the system's touch-feedback
+     * / keyboard-vibration setting, which is off on many phones, so the app's own switch did nothing there.
+     */
+    private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+        ctx.getSystemService(VibratorManager::class.java)?.defaultVibrator
+    else @Suppress("DEPRECATION") ctx.getSystemService(Vibrator::class.java)
+
+    private fun buzz(strong: Boolean = false) {
+        if (!haptics) return
+        val v = vibrator
+        if (v == null || !v.hasVibrator()) {
+            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING)
+            return
+        }
+        val level = if (strong) 2 else hapticStrength
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                v.vibrate(VibrationEffect.createPredefined(when (level) {
+                    0 -> VibrationEffect.EFFECT_TICK
+                    1 -> VibrationEffect.EFFECT_CLICK
+                    else -> VibrationEffect.EFFECT_HEAVY_CLICK
+                }))
+            } else {
+                v.vibrate(VibrationEffect.createOneShot(when (level) { 0 -> 8L; 1 -> 15L; else -> 25L }, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
+        } catch (_: Exception) {
+        }
+    }
 
     private var suggestions: List<String> = emptyList()
     private var bold = -1
@@ -340,7 +375,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         val opts = KeyboardLayout.alternates(k)
         if (opts.isEmpty()) return
         alts = Alts(k, longPressPointer, opts, 0)
-        if (haptics) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        buzz(strong = true)
         invalidate()
     }
 
@@ -361,7 +396,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val k = layer.keyAt(ux, min(uy, 3.99f)) ?: return true
                 val id = e.getPointerId(i)
                 pressed[id] = k
-                if (haptics) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                buzz()
                 // text keys fire on press (keeps order when presses overlap); ?123 fires on release so a long press
                 // can open the keyboard switcher instead
                 if (k.type == KeyType.TO_SYMBOLS) symDownAt = e.eventTime
@@ -404,7 +439,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                         val cell = (e.getX(i) / (width / 3f)).toInt().coerceIn(0, 2)
                         val si = intArrayOf(1, 0, 2)[cell]
                         if (si < suggestions.size) {
-                            if (haptics) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            buzz()
                             listener.onSuggestion(si)
                         }
                     }

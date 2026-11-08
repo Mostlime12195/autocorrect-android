@@ -16,9 +16,12 @@
         <ListPreference app:key="style" app:title="Style" app:defaultValue="standard"
             app:entries="@array/styles" app:entryValues="@array/style_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="haptics" app:title="Vibrate on key press" app:defaultValue="true" app:iconSpaceReserved="false" />
+        <ListPreference app:key="haptic_strength" app:title="Vibration strength" app:defaultValue="1" app:dependency="haptics"
+            app:entries="@array/haptic_strengths" app:entryValues="@array/haptic_strength_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="debug_overlay" app:title="Debug overlay" app:defaultValue="false"
             app:summary="Show model, timings (cold load, first inference, per word) and LM skip rate in the suggestion strip" app:iconSpaceReserved="false" />
         <Preference app:key="stats" app:title="Stats" app:iconSpaceReserved="false" />
+        <Preference app:key="stats_reset" app:title="Reset stats" app:summary="Count from now on (the log itself is kept)" app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="Your data" app:iconSpaceReserved="false">

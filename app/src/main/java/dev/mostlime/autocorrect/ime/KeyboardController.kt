@@ -546,6 +546,7 @@ class KeyboardController(
     /** No text: timing only, for words that weren't changed. */
     private fun writePerf(r: WordResult) {
         write(linkedMapOf("v" to 1, "ts" to System.currentTimeMillis(), "type" to "perf", "model" to config.modelId(),
+            "app_version" to config.appVersion,
             "lm_ms" to r3(r.lmMs), "n_scored" to r.nScored, "n_cands" to r.nCands, "skipped" to r.skipped, "cheap" to r.cheap,
             "ctx_tokens" to r.ctxTokens))
     }
