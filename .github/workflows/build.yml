@@ -47,8 +47,8 @@ jobs:
         run: |
           mkdir -p models
           [ -s models/lm_block4.step.int8.ort ] || curl -fsSL --retry 3 -o models/lm_block4.step.int8.ort "$MODEL_HOST/lm_block4.step.int8.ort" || rm -f models/lm_block4.step.int8.ort
-          # fallback: the web demo's ONNX version of the same graph
-          [ -s models/lm_block4.step.int8.ort ] || [ -s models/lm_block4.step.int8.onnx ] || curl -fsSL --retry 3 -o models/lm_block4.step.int8.onnx "https://smitten.mostlime.hackclub.app/autocorrect/lm_block4.step.int8.onnx" || rm -f models/lm_block4.step.int8.onnx
+          # fallback: the Nest mirror of the same file
+          [ -s models/lm_block4.step.int8.ort ] || curl -fsSL --retry 3 -o models/lm_block4.step.int8.ort "https://autocorrect.mostlime.hackclub.app/autocorrect-android/lm_block4.step.int8.ort" || rm -f models/lm_block4.step.int8.ort
           ls -la models
 
       - name: Unit tests (engine parity + app)

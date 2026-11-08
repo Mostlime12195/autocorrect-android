@@ -17,13 +17,11 @@ import dev.mostlime.autocorrect.engine.RewindChange
 import dev.mostlime.autocorrect.engine.RewindTarget
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordResult
+import dev.mostlime.autocorrect.log.EventLog
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.roundToInt
 
 /**
@@ -360,15 +358,6 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         val DEFAULT_PARAMS = DecodeParams(lam = 1.25, bias = 0.0, margin = 0.0, lamR = 1.25,
             pen = mapOf("split" to 2.0, "space" to 3.0, "contr" to 1.0, "contr_rw" to 0.0, "gdrop" to 1.0, "merge" to 4.0))
 
-        @Suppress("UNCHECKED_CAST")
-        fun toJson(v: Any?): JsonElement = when (v) {
-            null -> JsonNull
-            is String -> JsonPrimitive(v)
-            is Number -> JsonPrimitive(v)
-            is Boolean -> JsonPrimitive(v)
-            is Map<*, *> -> JsonObject((v as Map<String, Any?>).mapValues { toJson(it.value) })
-            is List<*> -> JsonArray(v.map { toJson(it) })
-            else -> JsonPrimitive(v.toString())
-        }
+        fun toJson(v: Any?): JsonElement = EventLog.toJson(v)
     }
 }

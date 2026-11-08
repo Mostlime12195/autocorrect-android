@@ -73,13 +73,27 @@ class SettingsActivity : AppCompatActivity() {
                 view?.post { UploadWorker.schedule(requireContext(), app.prefs) }
                 true
             }
+            findPreference<Preference>("delete_uploaded")!!.setOnPreferenceClickListener {
+                MaterialAlertDialogBuilder(requireContext()).setTitle("Delete your uploaded data?")
+                    .setMessage("Deletes everything this phone has uploaded from the server and clears the log on this phone. " +
+                        "If sharing stays on, future uploads use a new random ID that isn't linked to the old data.")
+                    .setPositiveButton("Delete") { _, _ ->
+                        lifecycleScope.launch {
+                            val ok = withContext(Dispatchers.IO) { UploadWorker.deleteMyData(app) }
+                            context?.let {
+                                Toast.makeText(it, if (ok) "Your uploaded data was deleted"
+                                    else "Couldn't reach the server. The delete will be retried automatically.", Toast.LENGTH_LONG).show()
+                            }
+                            refresh()
+                        }
+                    }.setNegativeButton("Cancel", null).show()
+                true
+            }
             findPreference<Preference>(Prefs.WIFI_ONLY)!!.setOnPreferenceChangeListener { _, _ -> view?.post { UploadWorker.schedule(requireContext(), app.prefs) }; true }
             findPreference<androidx.preference.EditTextPreference>(Prefs.UPLOAD_URL)!!.apply {
-                if (text.isNullOrBlank()) text = Prefs.DEFAULT_UPLOAD_URL
-                summaryProvider = Preference.SummaryProvider<androidx.preference.EditTextPreference> { p ->
-                    val t = p.text.orEmpty()
-                    if (t.contains(".invalid")) "$t (placeholder, nothing is sent)" else t
-                }
+                // older builds saved the example.invalid placeholder here
+                if (text.isNullOrBlank() || text!!.contains(".invalid")) text = Prefs.DEFAULT_UPLOAD_URL
+                summaryProvider = Preference.SummaryProvider<androidx.preference.EditTextPreference> { app.prefs.uploadUrl }
             }
             findPreference<Preference>("version")!!.summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
@@ -156,8 +170,9 @@ class SettingsActivity : AppCompatActivity() {
             }
             lifecycleScope.launch {
                 val (n, bytes) = withContext(Dispatchers.IO) { app.events.count() to app.events.sizeBytes() }
-                findPreference<Preference>("log_info")?.summary = "$n events, ${bytes / 1024} KB, stored only on this phone" +
-                    if (app.prefs.share) " (new events are uploaded)" else ""
+                findPreference<Preference>("log_info")?.summary = "$n events, ${bytes / 1024} KB, stored on this phone" +
+                    (if (app.prefs.share) " (new events are uploaded)" else "") +
+                    (if (app.prefs.pendingDeletes.isNotEmpty()) ". Server delete pending, retried automatically." else "")
             }
         }
 

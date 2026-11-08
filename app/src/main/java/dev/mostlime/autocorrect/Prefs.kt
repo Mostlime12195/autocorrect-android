@@ -37,7 +37,8 @@ class Prefs(private val ctx: Context) {
         set(v) = sp.edit().putLong(STATS_RESET, v).apply()
     val share get() = sp.getBoolean(SHARE, false)
     val wifiOnly get() = sp.getBoolean(WIFI_ONLY, true)
-    val uploadUrl get() = (sp.getString(UPLOAD_URL, null) ?: "").ifBlank { DEFAULT_UPLOAD_URL }
+    /** the custom URL from settings, else the default (older builds saved the example.invalid placeholder: ignored) */
+    val uploadUrl get() = (sp.getString(UPLOAD_URL, null) ?: "").trim().takeUnless { it.isBlank() || it.contains(".invalid") } ?: DEFAULT_UPLOAD_URL
     /** manifest mirrors, tried in order (a custom URL in settings replaces them) */
     val manifestUrls: List<String> get() = (sp.getString(MANIFEST_URL, null) ?: "").ifBlank { null }?.let { listOf(it) } ?: DEFAULT_MANIFEST_URLS
 
@@ -46,7 +47,15 @@ class Prefs(private val ctx: Context) {
         set(v) = sp.edit().putLong(UPLOAD_OFFSET, v).apply()
 
     val installId: String
-        get() = sp.getString(INSTALL_ID, null) ?: UUID.randomUUID().toString().also { sp.edit().putString(INSTALL_ID, it).apply() }
+        get() = sp.getString(INSTALL_ID, null) ?: UUID.randomUUID().toString().also { sp.edit().putString(INSTALL_ID, it).commit() }
+
+    /** New random install ID (after "delete my data", so later uploads aren't linked to the wiped one). */
+    fun rotateInstallId(): String = UUID.randomUUID().toString().also { sp.edit().putString(INSTALL_ID, it).commit() }
+
+    /** install IDs whose server-side delete hasn't gone through yet (retried by UploadWorker before any upload) */
+    var pendingDeletes: List<String>
+        get() = (sp.getString(PENDING_DELETES, null) ?: "").split(',').filter { it.isNotBlank() }
+        set(v) { sp.edit().putString(PENDING_DELETES, v.distinct().joinToString(",")).commit() }
 
     companion object {
         const val MODEL = "model"
@@ -67,12 +76,13 @@ class Prefs(private val ctx: Context) {
         const val MANIFEST_URL = "manifest_url"
         const val UPLOAD_OFFSET = "upload_offset"
         const val INSTALL_ID = "install_id"
+        const val PENDING_DELETES = "pending_deletes"
 
-        /** Placeholder: the collection endpoint doesn't exist yet (docs/upload-schema.md). Uploads to it are skipped. */
-        const val DEFAULT_UPLOAD_URL = "https://example.invalid/autocorrect/v1/events"
+        /** Collection endpoint (autocorrect repo collect/API.md); only used when sharing is switched on. */
+        const val DEFAULT_UPLOAD_URL = "https://autocorrect.mostlime.hackclub.app/api/v1/upload"
         val DEFAULT_MANIFEST_URLS = listOf(
             "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-v1/manifest.json",
-            "https://smitten.mostlime.hackclub.app/autocorrect-android/manifest.json",
+            "https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json",
         )
         val STYLES = listOf("casual", "standard", "formal")
     }

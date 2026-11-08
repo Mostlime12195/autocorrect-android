@@ -1,14 +1,176 @@
 {
  "schema": 1,
- "updated": "2026-11-08T19:24:26Z",
- "base_url": "https://smitten.mostlime.hackclub.app/autocorrect-android/",
+ "updated": "2026-11-08T21:27:40Z",
+ "base_url": "https://autocorrect.mostlime.hackclub.app/autocorrect-android/",
  "base_urls": [
-  "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-v1/",
-  "https://smitten.mostlime.hackclub.app/autocorrect-android/"
+  "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-style1/",
+  "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
  ],
- "default": "m2_int4",
+ "default": "m2s_int4",
  "battery_saver": "block4",
  "models": [
+  {
+   "id": "m2s_int4",
+   "label": "m2 style 106M int4",
+   "format": "ort",
+   "graph": {
+    "file": "m2s.step.int4m.ort",
+    "size": 78969984,
+    "sha256": "28e79b14b67c25659a41ce6ac84fd498bce530310eb7ec6bff116ad2e003fe39"
+   },
+   "vocab": {
+    "file": "vocab_m2.json",
+    "size": 695095,
+    "sha256": "f328549e080df02ab6a57e3ecf87dc8dd6470b286516ba00f67a86f383d1c77a"
+   },
+   "session_config": {},
+   "meta": {
+    "n_kv_heads": 2,
+    "head_dim": 64,
+    "conv_kernel": 7,
+    "d_model": 640,
+    "state_names": [
+     "k0",
+     "v0",
+     "k1",
+     "v1",
+     "k2",
+     "v2",
+     "k3",
+     "v3",
+     "k4",
+     "v4",
+     "k5",
+     "v5",
+     "c0",
+     "c1",
+     "c2",
+     "c3",
+     "c4",
+     "c5",
+     "c6",
+     "c7",
+     "c8",
+     "c9"
+    ],
+    "vocab_size": 32768,
+    "params": 106315648
+   },
+   "params": {
+    "lam": 1.25,
+    "bias": 0,
+    "margin": 0,
+    "lam_r": 1.25,
+    "pen": {
+     "split": 2,
+     "space": 3,
+     "contr": 1,
+     "contr_rw": 0,
+     "gdrop": 1,
+     "merge": 4
+    },
+    "pen_formal": {
+     "split": 2,
+     "space": 3,
+     "contr": -6,
+     "contr_rw": 2,
+     "gdrop": 6,
+     "merge": 4,
+     "caps": -2,
+     "punct": 0,
+     "comma": 0
+    }
+   },
+   "params_source": "fallback: m2 params (eval pending)",
+   "supports_style": true,
+   "style_tokens": {
+    "casual": 249,
+    "standard": 250,
+    "formal": 251
+   },
+   "style_params": {}
+  },
+  {
+   "id": "m2s_int8",
+   "label": "m2 style 106M int8",
+   "format": "ort",
+   "graph": {
+    "file": "m2s.step.int8.ort",
+    "size": 129693144,
+    "sha256": "a04a3d58b177a190b5e7cf98a8f274839cda59056b32ea121784d1944f193aea"
+   },
+   "vocab": {
+    "file": "vocab_m2.json",
+    "size": 695095,
+    "sha256": "f328549e080df02ab6a57e3ecf87dc8dd6470b286516ba00f67a86f383d1c77a"
+   },
+   "session_config": {},
+   "meta": {
+    "n_kv_heads": 2,
+    "head_dim": 64,
+    "conv_kernel": 7,
+    "d_model": 640,
+    "state_names": [
+     "k0",
+     "v0",
+     "k1",
+     "v1",
+     "k2",
+     "v2",
+     "k3",
+     "v3",
+     "k4",
+     "v4",
+     "k5",
+     "v5",
+     "c0",
+     "c1",
+     "c2",
+     "c3",
+     "c4",
+     "c5",
+     "c6",
+     "c7",
+     "c8",
+     "c9"
+    ],
+    "vocab_size": 32768,
+    "params": 106315648
+   },
+   "params": {
+    "lam": 1.25,
+    "bias": 0,
+    "margin": 0,
+    "lam_r": 1.25,
+    "pen": {
+     "split": 2,
+     "space": 3,
+     "contr": 1,
+     "contr_rw": 0,
+     "gdrop": 1,
+     "merge": 4
+    },
+    "pen_formal": {
+     "split": 2,
+     "space": 3,
+     "contr": -6,
+     "contr_rw": 2,
+     "gdrop": 6,
+     "merge": 4,
+     "caps": -2,
+     "punct": 0,
+     "comma": 0
+    }
+   },
+   "params_source": "fallback: m2 params (eval pending)",
+   "supports_style": true,
+   "style_tokens": {
+    "casual": 249,
+    "standard": 250,
+    "formal": 251
+   },
+   "style_params": {}
+  },
   {
    "id": "m2_int4",
    "label": "m2 106M int4",

@@ -3,7 +3,11 @@ package dev.mostlime.autocorrect.log
 import android.content.Context
 import android.util.Log
 import dev.mostlime.autocorrect.App
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -84,5 +88,17 @@ class EventLog(private val ctx: Context) {
         const val TAG = "AcLog"
         const val MAX_BYTES = 8L shl 20
         const val SCHEMA = 1
+
+        /** event map (KeyboardController) -> JSON, as written to the log and uploaded */
+        @Suppress("UNCHECKED_CAST")
+        fun toJson(v: Any?): JsonElement = when (v) {
+            null -> JsonNull
+            is String -> JsonPrimitive(v)
+            is Number -> JsonPrimitive(v)
+            is Boolean -> JsonPrimitive(v)
+            is Map<*, *> -> JsonObject((v as Map<String, Any?>).mapValues { toJson(it.value) })
+            is List<*> -> JsonArray(v.map { toJson(it) })
+            else -> JsonPrimitive(v.toString())
+        }
     }
 }
