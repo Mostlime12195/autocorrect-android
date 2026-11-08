@@ -45,7 +45,7 @@ interface Timer {
     fun cancel(token: Any)
 }
 
-class CorrectionRequest(val id: Int, val input: WordInput, val prev: PrevWord?, val merge: MergeInput?)
+class CorrectionRequest(val id: Int, val input: WordInput, val prev: PrevWord?, val merge: MergeInput?, val formal: Boolean = false)
 
 /** Snapshot of the settings the controller needs (re-read at every input start). */
 class ControllerConfig(
@@ -271,7 +271,8 @@ class KeyboardController(
         val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, p.takeIf { prevWord != null })
         pending = pd
         engine.cancelQueued()
-        val req = CorrectionRequest(id, WordInput(typed, tch, left, sep), prevWord, if (prevWord != null && p != null) MergeInput(p.typed, p.touches) else null)
+        val req = CorrectionRequest(id, WordInput(typed, tch, left, sep), prevWord, if (prevWord != null && p != null) MergeInput(p.typed, p.touches) else null,
+            formal = cfg.style == "formal")
         engine.correct(req) { r -> onCorrection(pd, r) }
         prev = null   // set again when this word's result is applied
         autoShift()
@@ -297,9 +298,11 @@ class KeyboardController(
         val ed = editor() ?: return
         val mg = r.merge?.takeIf { pd.prevOut != null }
         val rc = r.recheck?.takeIf { mg == null && pd.prevOut != null }
+        // new text for the previous word: re-check flip and/or formal punctuation
+        val prevNew = r.prevText?.takeIf { mg == null && pd.prevOut != null && it != pd.prevOut }
         val out = mg?.to ?: r.out
         val cur = composing.toString()
-        val changed = out != pd.typed || rc != null
+        val changed = out != pd.typed || prevNew != null
         val ev = if (!config.policy.sensitive) buildEvent(pd, r) else null
         if (!changed) {
             stats.unchanged++
@@ -308,7 +311,7 @@ class KeyboardController(
             prev = Prev(r.slot, r.chosen, pd.typed, r.lmScored, pd.typed, pd.touches)
             return
         }
-        val prefixOld = if (mg != null || rc != null) pd.prevOut + pd.prevSep else ""
+        val prefixOld = if (mg != null || prevNew != null) pd.prevOut + pd.prevSep else ""
         val oldSpan = prefixOld + pd.typed + pd.sepText + cur
         val live = ed.textBefore(oldSpan.length + 1)
         if (!live.endsWith(oldSpan) || ed.hasSelection()) {
@@ -316,11 +319,7 @@ class KeyboardController(
             ev?.let { it["outcome"] = "dropped_stale"; write(it) }
             return
         }
-        val newPrefix = when {
-            mg != null -> ""
-            rc != null -> rc.to + pd.prevSep
-            else -> ""
-        }
+        val newPrefix = if (prevNew != null) prevNew + pd.prevSep else ""
         val newSpan = newPrefix + out + pd.sepText
         ed.beginBatch()
         if (cur.isNotEmpty()) ed.finishComposing()
@@ -330,6 +329,7 @@ class KeyboardController(
         ed.endBatch()
         stats.applied++
         if (rc != null) ev?.set("recheck", mapOf("from" to rc.from, "to" to rc.to))
+        if (prevNew != null && rc?.to != prevNew) ev?.set("punct", mapOf("from" to pd.prevOut, "to" to prevNew))
         if (mg != null) ev?.let { it["merge"] = mapOf("from" to pd.prevOut + pd.prevSep + pd.typed, "to" to mg.to); it["final"] = mg.to }
         val undoPrefix = if (mg != null) pd.prevOut + pd.prevSep else ""
         last = Last(pd.typed, pd.touches, out, pd.sepText, r, ev, undoPrefix)

@@ -66,6 +66,8 @@ class WordResult(
     val lmMs: Double,
     val recheck: Recheck?,
     val merge: Merge? = null,
+    /** new text for the previous word (re-check flip and/or formal punctuation), null = unchanged */
+    val prevText: String? = null,
 ) {
     /** left-context tokens the LM saw (set by the caller from NeuralScorer.lastCtxTokens; -1 = no LM) */
     var ctxTokens: Int = -1
@@ -160,10 +162,10 @@ class Corrector(
      * Decide one finished word. scorer == null -> cheap path. prev -> re-check pass for the previous word.
      */
     fun correctWord(w: WordInput, scorer: LmScorer?, p: DecodeParams, prev: PrevWord?, allowChange: Boolean = true,
-                    merge: MergeInput? = null): WordResult {
+                    merge: MergeInput? = null, formal: Boolean = false): WordResult {
         val t0 = System.nanoTime()
         val mi = if (merge != null) MergeCtx(merge, w.typed, w.touches) else null
-        return decideSlot(candidates(w.typed, w.touches), w.left, w.sep, scorer, p, prev, allowChange, t0, mi)
+        return decideSlot(candidates(w.typed, w.touches), w.left, w.sep, scorer, p, prev, allowChange, t0, mi, formal)
     }
 
     class MergeCtx(val input: MergeInput, val typed: String, val touches: List<Touch>?)
@@ -171,7 +173,8 @@ class Corrector(
     private fun touchesOf(typed: String, t: List<Touch>?) = t?.takeIf { it.size == typed.length } ?: KeyGeom.keyTouches(typed)
 
     fun decideSlot(full: Slot, left: String, sep: String, scorer: LmScorer?, p: DecodeParams, prev: PrevWord?,
-                   allowChange: Boolean = true, t0: Long = System.nanoTime(), merge: MergeCtx? = null): WordResult {
+                   allowChange: Boolean = true, t0: Long = System.nanoTime(), merge: MergeCtx? = null,
+                   formal: Boolean = false): WordResult {
         stats.words++
         if (!allowChange || full.typedIdx < 0 && full.cands.isEmpty()) {
             return keep(full, t0)
@@ -185,7 +188,8 @@ class Corrector(
                 lmMs = ms(t0), recheck = null)
         }
         val mergePossible = merge != null && prev != null && sep == " " && gen2?.mergeOk(merge.input.prevTyped, merge.typed) == true
-        if (!mergePossible && canSkip(full)) {
+        // formal style needs the LM at every word (capitals, punctuation after the previous word)
+        if (!formal && !mergePossible && canSkip(full)) {
             stats.lmSkipped++
             val sc = DoubleArray(full.cands.size) { cheapScore(full, it) }
             return WordResult(full, sc, null, full.typedIdx, full.cands[full.typedIdx], skipped = true, cheap = false, nScored = 0,
@@ -196,7 +200,7 @@ class Corrector(
         val (k, sc) = choose(s, lp, p.lam, p.bias, p.pen)
         var recheck: Recheck? = null
         var mergeOut: Merge? = null
-        if (prev != null && p.margin != null && (prev.lmScored || !config.recheckOnlyIfScored || mergePossible)) {
+        if (prev != null && p.margin != null && (prev.lmScored || !config.recheckOnlyIfScored || mergePossible || formal)) {
             val nxt = sep + s.cands[k]
             val lp2 = scorer.score(prev.slot.cands.map { LmReq(prev.left, prev.sep + it + nxt) })
             val (k2, sc2) = choose(prev.slot, lp2, p.lamRe, p.bias, p.pen)
@@ -222,11 +226,40 @@ class Corrector(
                 }
             }
         }
+        var out = s.cands[k]
+        var prevText: String? = recheck?.to
+        if (formal) {
+            // A2. capitals: sentence start, i -> I (pipeline.js decodeV2 with style)
+            if (isLower(out.take(1)) && (sentStart(left + sep) || out.split(' ')[0] in I_WORDS)) {
+                val lc = scorer.score(listOf(LmReq(left, sep + cap1(out))))[0]
+                val kd = s.kind(k)
+                val v = s.sp[k] + p.lam * lc + (if (k == s.typedIdx) p.bias else 0.0) - (if (kd != Kind.WORD) p.pen[kd] ?: 0.0 else 0.0) - (p.pen["caps"] ?: 0.0)
+                if (v > sc[k]) out = cap1(out)
+            }
+            // D. punctuation after the previous word
+            if (prev != null && mergeOut == null && sep.isNotEmpty() && sep.isBlank()) {
+                val po = prevText ?: prev.slot.cands[prev.idx]
+                if (po.isNotEmpty() && po.last().let { it in 'a'..'z' || it in 'A'..'Z' }) {
+                    val pre = prev.sep + po
+                    val reqs = listOf(LmReq(prev.left, pre + sep + out)) +
+                        PUNCT.map { (pc, _) -> LmReq(prev.left, pre + pc + sep + (if (pc in SENT_END) cap1(out) else out)) }
+                    val lpp = scorer.score(reqs)
+                    var best = p.lamRe * lpp[0]
+                    var bj = -1
+                    PUNCT.forEachIndexed { j, (_, kind) -> val v = p.lamRe * lpp[1 + j] - (p.pen[kind] ?: 0.0); if (v > best) { best = v; bj = j } }
+                    if (bj >= 0) {
+                        val pc = PUNCT[bj].first
+                        prevText = po + pc
+                        if (pc in SENT_END && isLower(out.take(1))) out = cap1(out)
+                    }
+                }
+            }
+        }
         stats.lmRuns++
         val dt = ms(t0)
         stats.lmMsTotal += dt
-        return WordResult(s, sc, lp, k, s.cands[k], skipped = false, cheap = false, nScored = s.cands.size, nCands = full.cands.size,
-            lmMs = dt, recheck = recheck, merge = mergeOut)
+        return WordResult(s, sc, lp, k, out, skipped = false, cheap = false, nScored = s.cands.size, nCands = full.cands.size,
+            lmMs = dt, recheck = recheck, merge = mergeOut, prevText = prevText)
     }
 
     private fun keep(full: Slot, t0: Long): WordResult {
@@ -239,6 +272,16 @@ class Corrector(
     private fun ms(t0: Long) = (System.nanoTime() - t0) / 1e6
 
     companion object {
+        private const val SENT_END = ".?!"
+        private val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")
+        private val PUNCT = listOf("." to "punct", "?" to "punct", "!" to "punct", "," to "comma")
+        private fun cap1(s: String) = s.take(1).uppercase() + s.drop(1)
+        private fun isLower(c: String) = c.isNotEmpty() && c != c.uppercase() && c == c.lowercase()
+        private fun sentStart(text: String): Boolean {
+            val t = text.trimEnd(' ', '\t')
+            return t.isEmpty() || t.last() in SENT_END || t.last() == '\n'
+        }
+
         /** log prior for a typed string that isn't in the lexicon (cheap path) */
         const val OOV_LOGP = -20.0
     }

@@ -40,9 +40,14 @@ class ModelSpec(
     val styleTokens: Map<String, Int?>,
     /** optional per-style decode params (tuned per style once the style evals land) */
     val styleParams: Map<String, DecodeParams>,
+    /** cand-gen v2 kind penalties for the formal style (adds caps / punct / comma); params.pen is the default style */
+    val penFormal: Map<String, Double> = emptyMap(),
 ) {
     fun styleToken(style: String): Int? = if (supportsStyle) styleTokens[style] else null
-    fun paramsFor(style: String): DecodeParams = if (supportsStyle) styleParams[style] ?: params else params
+    fun paramsFor(style: String): DecodeParams {
+        val base = if (supportsStyle) styleParams[style] ?: params else params
+        return if (style == "formal" && penFormal.isNotEmpty()) base.copy(pen = penFormal) else base
+    }
 
     val files get() = listOf(graph, vocab)
     val downloadBytes get() = files.sumOf { it.size }
@@ -83,6 +88,7 @@ class Manifest(val schema: Int, val updated: String, val baseUrl: String, val de
                     supportsStyle = m["supports_style"]?.jsonPrimitive?.booleanOrNull ?: false,
                     styleTokens = m["style_tokens"]?.jsonObject?.mapValues { it.value.jsonPrimitive.intOrNull } ?: emptyMap(),
                     styleParams = m["style_params"]?.jsonObject?.mapValues { dp(it.value.jsonObject) } ?: emptyMap(),
+                    penFormal = m["params"]!!.jsonObject["pen_formal"]?.jsonObject?.mapValues { it.value.jsonPrimitive.double } ?: emptyMap(),
                 )
             }
             return Manifest(

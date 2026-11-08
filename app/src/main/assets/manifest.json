@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "updated": "2026-11-08T17:41:06Z",
+ "updated": "2026-11-08T18:43:23Z",
  "base_url": "https://smitten.mostlime.hackclub.app/autocorrect/",
  "default": "m2_int4",
  "battery_saver": "block4",
@@ -58,7 +58,26 @@
     "lam": 1.25,
     "bias": 0,
     "margin": 0,
-    "lam_r": 1.25
+    "lam_r": 1.25,
+    "pen": {
+     "split": 2,
+     "space": 3,
+     "contr": 1,
+     "contr_rw": 0,
+     "gdrop": 1,
+     "merge": 4
+    },
+    "pen_formal": {
+     "split": 2,
+     "space": 3,
+     "contr": -6,
+     "contr_rw": 2,
+     "gdrop": 6,
+     "merge": 4,
+     "caps": -2,
+     "punct": 0,
+     "comma": 0
+    }
    },
    "params_source": "m2_100m_block4_3b/eval_qat1.json",
    "supports_style": false,
@@ -122,7 +141,26 @@
     "lam": 1.25,
     "bias": 0,
     "margin": 0,
-    "lam_r": 1.25
+    "lam_r": 1.25,
+    "pen": {
+     "split": 2,
+     "space": 3,
+     "contr": 1,
+     "contr_rw": 0,
+     "gdrop": 1,
+     "merge": 4
+    },
+    "pen_formal": {
+     "split": 2,
+     "space": 3,
+     "contr": -6,
+     "contr_rw": 2,
+     "gdrop": 6,
+     "merge": 4,
+     "caps": -2,
+     "punct": 0,
+     "comma": 0
+    }
    },
    "params_source": "m2_100m_block4_3b/eval_qat1.json",
    "supports_style": false,
@@ -183,7 +221,26 @@
     "lam": 1.0,
     "bias": 0,
     "margin": 0,
-    "lam_r": 1.4
+    "lam_r": 1.4,
+    "pen": {
+     "split": 2,
+     "space": 3,
+     "contr": 1,
+     "contr_rw": 0,
+     "gdrop": 1,
+     "merge": 4
+    },
+    "pen_formal": {
+     "split": 2,
+     "space": 3,
+     "contr": -6,
+     "contr_rw": 2,
+     "gdrop": 6,
+     "merge": 4,
+     "caps": -2,
+     "punct": 0,
+     "comma": 0
+    }
    },
    "params_source": "lm_block4_3b/eval_qat0.json",
    "supports_style": false,

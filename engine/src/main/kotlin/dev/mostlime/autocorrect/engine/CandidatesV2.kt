@@ -103,7 +103,7 @@ class CandidateGeneratorV2(
     fun splits(touches: List<Touch>, typed: String): List<Cand> {
         val tl = typed.lowercase()
         val n = tl.length
-        if (n < minSplit || n > maxSplit || !isAlpha(tl) || tl in common || touches.size != n) return emptyList()
+        if (n < minSplit || n > maxSplit || !isAlpha(tl) || tl in common || touches.size != n || mixedCase(typed)) return emptyList()
         val em = sp.emitTable(touches)
         val bounds = ArrayList<Bound>()
         for (p in 1 until n) bounds.add(Bound(p, p, LP_NOSPACE, false))
@@ -160,6 +160,7 @@ class CandidateGeneratorV2(
     }
 
     fun mergeOk(typed1: String, typed2: String): Boolean {
+        if (mixedCase(typed1) || mixedCase(typed2)) return false
         val t1 = typed1.lowercase()
         val t2 = typed2.lowercase()
         if (!isAlpha(t1) || !isAlpha(t2) || t1.length + t2.length < 3 || t1.length + t2.length > maxSplit) return false
@@ -168,9 +169,9 @@ class CandidateGeneratorV2(
 
     /** two typed tokens read as one word (spurious space): -> [(word, sp)] */
     fun mergeCandidates(touches1: List<Touch>, typed1: String, touches2: List<Touch>, typed2: String, top: Int = 3, slack: Double = 12.0): List<Cand> {
+        if (!mergeOk(typed1, typed2)) return emptyList()
         val t1 = typed1.lowercase()
         val t2 = typed2.lowercase()
-        if (!mergeOk(t1, t2)) return emptyList()
         val s = t1 + t2
         val got = HashSet<Int>()
         lookup(s, got)
@@ -195,6 +196,8 @@ class CandidateGeneratorV2(
         val LP_EXTRA_SPACE = ln(0.01)
         val SPLIT_SINGLE = setOf("a", "i")
         fun isAlpha(s: String) = s.isNotEmpty() && s.all { it in 'a'..'z' }
+        /** camelCase / handle-like tokens (a capital after the first letter, not ALL CAPS): never split or merged */
+        fun mixedCase(s: String) = s.drop(1).any { it in 'A'..'Z' } && s != s.uppercase()
 
     }
 }

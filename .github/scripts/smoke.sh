@@ -44,7 +44,7 @@ def key(c):
 for c in "hello wrold thsi is a tesy ":
     x, y = key(c); print(int(x), int(y))
 PY
-while read X Y; do adb shell input tap $X $Y; sleep 0.4; done < smoke/taps.txt
+while read X Y; do adb shell input tap $X $Y < /dev/null; sleep 0.4; done < smoke/taps.txt
 sleep 3
 adb exec-out screencap -p > smoke/typed.png
 # same keyboard with gesture navigation (3-button is the emulator default)

@@ -65,7 +65,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                     val corr = EngineHolder.ensureLexicon(app)
                     val sc = EngineHolder.scorer?.takeIf { !it.step.closed }
                     sc?.lastCtxTokens = 0
-                    val res = corr.correctWord(req.input, sc, EngineHolder.params ?: DEFAULT_PARAMS, req.prev, merge = req.merge)
+                    val res = corr.correctWord(req.input, sc, EngineHolder.params ?: DEFAULT_PARAMS, req.prev, merge = req.merge, formal = req.formal)
                     if (sc != null && res.lmScored) res.ctxTokens = sc.lastCtxTokens
                     res
                 } catch (e: Throwable) {
@@ -232,7 +232,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     companion object {
         const val TAG = "AcIME"
-        val DEFAULT_PARAMS = DecodeParams(lam = 1.25, bias = 0.0, margin = 0.0, lamR = 1.25)
+        /** web/site/params_v2.json (default style) */
+        val DEFAULT_PARAMS = DecodeParams(lam = 1.25, bias = 0.0, margin = 0.0, lamR = 1.25,
+            pen = mapOf("split" to 2.0, "space" to 3.0, "contr" to 1.0, "contr_rw" to 0.0, "gdrop" to 1.0, "merge" to 4.0))
 
         @Suppress("UNCHECKED_CAST")
         fun toJson(v: Any?): JsonElement = when (v) {
