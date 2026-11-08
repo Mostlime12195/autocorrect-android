@@ -101,7 +101,6 @@ object EngineHolder {
             val f = app.store.file(want.graph)
             val buf = RandomAccessFile(f, "r").use { it.channel.map(FileChannel.MapMode.READ_ONLY, 0, it.length()) }
             val env = OrtEnvironment.getEnvironment()
-            runCatching { env.disableTelemetryEvents() }
             val step = StepModel.open(env, buf, want.meta, threads = 2,
                 ortFormat = want.format == "ort", extraConfig = want.sessionConfig)
             withContext(dispatcher) {

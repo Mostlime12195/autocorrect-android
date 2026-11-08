@@ -81,15 +81,31 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
 
     init {
         setBackgroundColor(bg)
-        setOnApplyWindowInsetsListener { _, insets ->
-            val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) insets.getInsets(WindowInsets.Type.navigationBars()).bottom
-            else @Suppress("DEPRECATION") insets.systemWindowInsetBottom
-            if (b != bottomInset) { bottomInset = b; requestLayout() }
-            insets
-        }
+    }
+
+    /** Bottom system area the keys must stay clear of: 3-button bar, gesture handle, display cutout. */
+    private fun bottomOf(ins: WindowInsets?): Int {
+        if (ins == null) return 0
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            maxOf(ins.getInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.displayCutout()).bottom,
+                ins.getInsets(WindowInsets.Type.tappableElement()).bottom)
+        } else @Suppress("DEPRECATION") ins.systemWindowInsetBottom
+    }
+
+    override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        val b = bottomOf(insets)
+        if (b != bottomInset) { bottomInset = b; requestLayout() }
+        return insets
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        requestApplyInsets()
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        // edge-to-edge IME windows (Android 15+) can hand the insets to a parent: read the window's own insets too
+        bottomInset = maxOf(bottomInset, bottomOf(rootWindowInsets))
         val w = View.MeasureSpec.getSize(widthMeasureSpec)
         keyW = w / 10f
         rowH = (keyW * 1.25f).coerceIn(46 * dp, 58 * dp)

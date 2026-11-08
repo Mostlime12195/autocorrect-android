@@ -11,13 +11,17 @@ data class CorrectorConfig(
     /** ... and its spatial fit is within this many nats per letter of a perfect key-centre hit. */
     val skipFitPerLetter: Double = SKIP_FIT_PER_LETTER,
     /** Cheap path (no LM): the typed string gets this bonus so only clear typos get changed. */
-    val cheapKeepBias: Double = 2.0,
+    val cheapKeepBias: Double = 0.5,
+    /** Only words this frequent (lexicon rank) can skip the LM: a rare word one edit from a common one ("oen" / "eon")
+     *  still gets scored. */
+    val skipMaxRank: Int = SKIP_MAX_RANK,
     /** Re-check the previous word only when its own decision went through the LM. */
     val recheckOnlyIfScored: Boolean = true,
 ) {
     companion object {
         const val SKIP_MARGIN = 3.0
         const val SKIP_FIT_PER_LETTER = 0.6
+        const val SKIP_MAX_RANK = 20000
     }
 }
 
@@ -63,6 +67,8 @@ class WordResult(
     val recheck: Recheck?,
     val merge: Merge? = null,
 ) {
+    /** left-context tokens the LM saw (set by the caller from NeuralScorer.lastCtxTokens; -1 = no LM) */
+    var ctxTokens: Int = -1
     val changed get() = out != slot.typed
     val lmScored get() = !skipped && !cheap
 
@@ -136,7 +142,8 @@ class Corrector(
         val ti = s.typedIdx
         if (ti < 0) return false
         val tl = s.typed.lowercase()
-        if (!lex.index.containsKey(tl)) return false
+        val rank = lex.index[tl] ?: return false
+        if (rank >= config.skipMaxRank) return false
         if (CONFUSIONS.containsKey(tl)) return false
         if (s.cands.indices.any { s.kind(it) != Kind.WORD }) return false        // contraction / g-drop / split alternatives
         val letters = tl.count { it != '\'' }
@@ -233,6 +240,6 @@ class Corrector(
 
     companion object {
         /** log prior for a typed string that isn't in the lexicon (cheap path) */
-        const val OOV_LOGP = -16.0
+        const val OOV_LOGP = -20.0
     }
 }

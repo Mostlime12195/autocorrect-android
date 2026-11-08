@@ -164,6 +164,8 @@ class NeuralScorer(
         private set
     var calls = 0L
         private set
+    /** longest context (tokens, incl. EOS / style; at most MAX_CTX) scored since the caller last reset it */
+    var lastCtxTokens = 0
 
     private fun enc(s: String): IntArray {
         val body = if (s.isEmpty()) IntArray(0) else tok.encode(s)
@@ -237,6 +239,7 @@ class NeuralScorer(
         }
         val out = DoubleArray(reqs.size)
         if (keys.isEmpty()) return out
+        lastCtxTokens = maxOf(lastCtxTokens, keys.maxOf { it.ctx.size })
         val ctxs = keys.map { it.ctx }
         var p = 0
         while (ctxs.all { it.size > p } && ctxs.all { it[p] == ctxs[0][p] }) p++
