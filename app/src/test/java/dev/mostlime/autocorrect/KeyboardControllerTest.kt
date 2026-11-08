@@ -68,6 +68,13 @@ class KeyboardControllerTest {
         }
         /** typo marks (SuggestionSpans in the app): start in the text -> suggestions */
         val marks = HashMap<Int, List<String>>()
+        override fun cursorPos() = text.length
+        override fun replaceRange(offset: Int, len: Int, text: String) {
+            val start = this.text.length + offset
+            this.text.replace(start, start + len, text)
+            marks.keys.removeAll { it >= start }
+            shown()
+        }
         override fun remark(offset: Int, text: String, marks: List<TypoMark>) {
             val start = this.text.length + offset
             if (start < 0 || this.text.substring(start, minOf(this.text.length, start + text.length)) != text) return

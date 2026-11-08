@@ -47,6 +47,19 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         private val ic get() = currentInputConnection
         override fun textBefore(n: Int) = ic?.getTextBeforeCursor(n, 0)?.toString() ?: ""
         override fun textAfter(n: Int) = ic?.getTextAfterCursor(n, 0)?.toString() ?: ""
+        override fun cursorPos(): Int {
+            val et = ic?.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return -1
+            return if (et.selectionStart < 0) -1 else et.startOffset + et.selectionStart
+        }
+        override fun replaceRange(offset: Int, len: Int, text: String) {
+            val c = ic ?: return
+            val cur = cursorPos().takeIf { it >= 0 } ?: return
+            val a = cur + offset; val b = a + len
+            if (a < 0) return
+            val newCur = when { b <= cur -> cur + text.length - len; a >= cur -> cur; else -> a + text.length }
+            c.beginBatchEdit()
+            try { if (c.setComposingRegion(a, b)) { c.commitText(text, 1); c.setSelection(newCur, newCur) } } finally { c.endBatchEdit() }
+        }
         override fun moveCursor(dir: String) {
             sendDownUpKeyEvents(when (dir) { "L" -> KeyEvent.KEYCODE_DPAD_LEFT; "R" -> KeyEvent.KEYCODE_DPAD_RIGHT; "U" -> KeyEvent.KEYCODE_DPAD_UP; else -> KeyEvent.KEYCODE_DPAD_DOWN })
         }
@@ -392,6 +405,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         ctl.selectionChanged()
+        ctl.cursorMoved(newSelStart, newSelEnd)
     }
 
     override fun onTrimMemory(level: Int) {

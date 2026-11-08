@@ -311,6 +311,26 @@ class LearningTest {
         assertEquals(1, ed.marks.size)
     }
 
+    /** the flagged word is several words back: tapping into it (cursor on it) brings its fixes, and a pick fixes it */
+    @Test fun cursorOnAFlaggedWordShowsItsFixes() {
+        start(suggestOnly = true)
+        type("so teh quick brown fox is great ")
+        engine.deliver()
+        assertEquals(StripMode.TYPO, ctl.stripMode)
+        ctl.pickSuggestion(-1)                              // nothing
+        // the user moves on; the strip shows something else
+        type("a")
+        assertEquals(StripMode.NONE, ctl.stripMode)
+        type("\b")
+        // the cursor lands inside "teh" (FakeEditor's cursor is at the end, so report the word's own offset)
+        val at = ed.text.indexOf("teh")
+        ctl.cursorMoved(at + 1, at + 1)
+        assertEquals(StripMode.TYPO, ctl.stripMode)
+        assertEquals("the", ctl.shown[0])
+        ctl.pickSuggestion(0)
+        assertEquals("so the quick brown fox is great ", ed.text.toString())
+    }
+
     @Test fun spellingClassification() {
         start()
         assertTrue(ctl.isSpellingEdit("fized", "fixed"))

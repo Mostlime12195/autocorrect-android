@@ -30,6 +30,10 @@ interface Editor {
     fun replaceBefore(n: Int, text: String, mark: TypoMark?) = replaceBefore(n, text)
     /** cursor keys: "L", "R", "U", "D" */
     fun moveCursor(dir: String) {}
+    /** cursor position in the field (-1 = unknown) */
+    fun cursorPos(): Int = -1
+    /** replace len chars starting offset chars from the cursor (negative = before it); the cursor keeps its place in the text */
+    fun replaceRange(offset: Int, len: Int, text: String) {}
     /** text after the cursor (suggest-only idle pass) */
     fun textAfter(n: Int): String = ""
     /** re-commit `text` (unchanged) starting `offset` chars from the cursor (negative = before it) with exactly these typo marks */
@@ -191,6 +195,11 @@ class KeyboardController(
         override fun replaceBefore(n: Int, text: String, mark: TypoMark?) { e.replaceBefore(n, text, mark); pos += text.length - n; compLen = 0 }
         override fun textAfter(n: Int) = e.textAfter(n)
         override fun moveCursor(dir: String) { e.moveCursor(dir); invalidatePendings() }
+        override fun cursorPos() = e.cursorPos()
+        override fun replaceRange(offset: Int, len: Int, text: String) {
+            e.replaceRange(offset, len, text)
+            if (offset + len <= 0) pos += text.length - len else invalidatePendings()
+        }
         override fun remark(offset: Int, text: String, marks: List<TypoMark>) = e.remark(offset, text, marks)
         override fun beginBatch() = e.beginBatch()
         override fun endBatch() = e.endBatch()
@@ -213,6 +222,22 @@ class KeyboardController(
     private class Typo(val start: Long, val typed: String, val fixes: List<String>, val spelling: Boolean,
                        val event: MutableMap<String, Any?>?, val leftContext: String)
     private var typo: Typo? = null
+
+    /**
+     * Flagged words anywhere in the field (suggest-only / unsure), by their offset in the field. Offsets go stale when
+     * text before them changes: a flag is checked against the text (and looked for nearby) whenever it's used.
+     */
+    private class Flag(var start: Int, val word: String, val fixes: List<String>, val spelling: Boolean,
+                       val event: MutableMap<String, Any?>?, val leftContext: String)
+    private val flags = ArrayList<Flag>()
+    /** the flag the cursor is on (its fixes are in the strip) */
+    private var cursorFlag: Flag? = null
+
+    private fun addFlag(f: Flag) {
+        flags.removeAll { it.start < f.start + f.word.length && f.start < it.start + it.word.length }
+        flags.add(f)
+        while (flags.size > MAX_FLAGS) flags.removeAt(0)
+    }
     /** word just added to the dictionary by repeated undos (strip offers to take it back) */
     private var dictAdded: String? = null
 
@@ -248,7 +273,7 @@ class KeyboardController(
         flushLast()
         config = cfg
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
-        typo = null; dictAdded = null; punctTried.clear(); sentenceCache.clear()
+        typo = null; dictAdded = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
         idleToken?.let { timer.cancel(it) }; idleToken = null
         lastPress = null; swipeShift = null; swipePending = 0; swipeSpace = false
         releaseHold()
@@ -539,9 +564,16 @@ class KeyboardController(
             if (res == null || pos != snapPos || composing.isNotEmpty() || holding) return@checkSentences
             val e2 = ed() ?: return@checkSentences
             if (e2.textBefore(IDLE_CHARS) != before || e2.textAfter(IDLE_CHARS) != after || e2.hasSelection()) return@checkSentences
+            val cp = e2.cursorPos()
             for ((j, fixes) in res.withIndex()) {
-                val (r, key, _) = batch[j]
+                val (r, key, left) = batch[j]
                 sentenceCache[key] = fixes
+                if (cp >= 0) {
+                    val s0 = cp - before.length + r.first
+                    flags.removeAll { it.start >= s0 && it.start < s0 + (r.last - r.first + 1) }
+                    for (fx in fixes) addFlag(Flag(s0 + fx.start, fx.from, fx.fixes, isSpellingEdit(fx.from, fx.to), null,
+                        (left + text.substring(r.first, r.first + fx.start)).takeLast(LOG_CONTEXT_CHARS)))
+                }
                 e2.remark(r.first - before.length, text.substring(r), fixes.map { TypoMark(it.start, it.from.length, it.fixes) })
                 // the strip's flagged word: drop it if this pass found it fine
                 val t = typo
@@ -823,6 +855,14 @@ class KeyboardController(
             }
             StripMode.TYPO -> {
                 // an explicit pick: the only way the text changes in suggest-only mode
+                cursorFlag?.let { f ->
+                    cursorFlag = null; typo = null
+                    if (replaceFlag(ed, f, pick)) {
+                        f.event?.let { val e = LinkedHashMap(it); e["outcome"] = "strip_pick"; e["final"] = pick; e["ts"] = System.currentTimeMillis(); write(e) }
+                    }
+                    setStrip(emptyList(), -1, StripMode.NONE)
+                    return
+                }
                 val t = typo ?: return
                 typo = null
                 if (replaceAt(ed, t.start, t.typed, pick)) {
@@ -872,18 +912,83 @@ class KeyboardController(
 
     /** "not a typo" (spelling flag): squiggle off + dictionary; "ignore" (other flags): squiggle off + suppression */
     private fun notTypo(ed: Editor) {
+        cursorFlag?.let { f ->
+            cursorFlag = null
+            if (replaceFlag(ed, f, f.word)) {   // same text, without the mark
+                // the same word may also be the typing-time flag
+                typo?.let { t -> if (t.typed == f.word) typo = null }
+                learnNotTypo(f.word, f.spelling, f.fixes, f.leftContext, f.event)
+            }
+            setStrip(emptyList(), -1, StripMode.NONE)
+            return
+        }
         val t = typo ?: return
         typo = null
         replaceAt(ed, t.start, t.typed, t.typed)   // same text, without the mark
-        if (t.spelling) {
-            learning.addWord(t.typed)
+        flags.removeAll { it.word == t.typed && it.event === t.event }
+        learnNotTypo(t.typed, t.spelling, t.fixes, t.leftContext, t.event)
+        setStrip(emptyList(), -1, StripMode.NONE)
+    }
+
+    private fun learnNotTypo(typed: String, spelling: Boolean, fixes: List<String>, left: String, ev: Map<String, Any?>?) {
+        if (spelling) {
+            learning.addWord(typed)
             if (!config.policy.sensitive) write(linkedMapOf("v" to 1, "id" to UUID.randomUUID().toString(), "ts" to System.currentTimeMillis(),
-                "type" to "not_typo", "typed" to t.typed, "left_context" to t.leftContext, "candidates" to t.fixes.take(3).map { mapOf("w" to it) },
+                "type" to "not_typo", "typed" to typed, "left_context" to left, "candidates" to fixes.take(3).map { mapOf("w" to it) },
                 "style" to config.style, "model" to config.modelId(), "app_version" to config.appVersion))
         } else {
-            t.fixes.firstOrNull()?.let { suppressEdit(t.typed, it, "ignore", t.event) }
+            fixes.firstOrNull()?.let { suppressEdit(typed, it, "ignore", ev) }
         }
-        setStrip(emptyList(), -1, StripMode.NONE)
+    }
+
+    /**
+     * The cursor moved (tap / arrows): on or right next to a flagged word, show its fixes in the strip (works in every
+     * app, also those that ignore SuggestionSpans).
+     */
+    fun cursorMoved(selStart: Int, selEnd: Int) {
+        if (holding || composing.isNotEmpty() || selStart != selEnd || selStart < 0 || flags.isEmpty()) {
+            if (cursorFlag != null && selStart != selEnd) { cursorFlag = null; if (stripMode == StripMode.TYPO) setStrip(emptyList(), -1, StripMode.NONE) }
+            return
+        }
+        val ed = ed() ?: return
+        val f = flags.lastOrNull { selStart >= it.start && selStart <= it.start + it.word.length }
+        if (f == null || !locate(ed, f, ed.cursorPos().takeIf { it >= 0 } ?: selStart)) {
+            if (cursorFlag != null) { cursorFlag = null; if (stripMode == StripMode.TYPO) setStrip(emptyList(), -1, StripMode.NONE) }
+            return
+        }
+        cursorFlag = f
+        setStrip(f.fixes, 0, StripMode.TYPO, hint = "typo?", action = if (f.spelling) "not a typo" else "ignore")
+    }
+
+    /** is f.word still at f.start (cursor at cur)? else look for it nearby and move the flag; false = gone */
+    private fun locate(ed: Editor, f: Flag, cur: Int): Boolean {
+        val back = (cur - f.start + LOCATE_SLACK).coerceAtLeast(0)
+        val fwd = (f.start + f.word.length - cur + LOCATE_SLACK).coerceAtLeast(0)
+        val win = ed.textBefore(back) + ed.textAfter(fwd)
+        val base = cur - minOf(back, ed.textBefore(back).length)
+        var best = -1
+        var i = win.indexOf(f.word)
+        while (i >= 0) {
+            val abs = base + i
+            val wordStart = i == 0 || !win[i - 1].isLetterOrDigit()
+            val wordEnd = i + f.word.length >= win.length || !win[i + f.word.length].isLetterOrDigit()
+            if (wordStart && wordEnd && (best < 0 || kotlin.math.abs(abs - f.start) < kotlin.math.abs(best - f.start))) best = abs
+            i = win.indexOf(f.word, i + 1)
+        }
+        if (best < 0) { flags.remove(f); return false }
+        f.start = best
+        return true
+    }
+
+    private fun replaceFlag(ed: Editor, f: Flag, text: String): Boolean {
+        val cur = ed.cursorPos()
+        if (cur < 0 || !locate(ed, f, cur)) return false
+        ed.replaceRange(f.start - cur, f.word.length, text)
+        flags.remove(f)
+        val d = text.length - f.word.length
+        if (d != 0) for (o in flags) if (o.start > f.start) o.start += d
+        prev = null; last = null
+        return true
     }
 
     /**
@@ -913,6 +1018,8 @@ class KeyboardController(
         val spelling = isSpellingEdit(pd.typed, r.out)
         ev?.let { it["outcome"] = "flagged"; it["final"] = pd.typed; it["flag"] = why; it["flag_kind"] = if (spelling) "spelling" else "other"; write(it) }
         typo = Typo(pd.anchor - core.length, pd.typed, fixes, spelling, ev, pd.before.takeLast(LOG_CONTEXT_CHARS))
+        val cp = ed.cursorPos()
+        if (cp >= 0) addFlag(Flag(cp - (pos - typo!!.start).toInt(), pd.typed, fixes, spelling, ev, pd.before.takeLast(LOG_CONTEXT_CHARS)))
         prev = null
         showTypo()
         return true
@@ -1196,6 +1303,9 @@ class KeyboardController(
         const val IDLE_CHARS = 2000
         const val IDLE_LEFT = 200
         const val IDLE_SENTENCES = 6
+        const val MAX_FLAGS = 64
+        /** how far a flag is looked for when its offset went stale */
+        const val LOCATE_SLACK = 48
         /** a flagged typo: the fix must beat the typed word by this much (score units, nats) */
         const val FLAG_MARGIN = 1.5
         /** "only auto-correct when confident": the choice must beat every other candidate by this much (WordResult.margin) */

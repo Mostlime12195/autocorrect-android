@@ -40,7 +40,8 @@ class LayoutTest {
         }
         // QWERTY keeps the trained geometry: q at (0.5, 0.7), a at (1.0, 2.1), z at (2.0, 3.5)
         val q = KeyboardLayout.centers(KeyboardLayout.LETTERS)
-        assertTrue(q['q'] == (0.5 to 0.7) && q['a'] == (1.0 to 2.1) && kotlin.math.abs(q['z']!!.second - 3.5) < 1e-9 && q['z']!!.first == 2.0)
+        fun near(c: Char, x: Double, y: Double) = kotlin.math.abs(q[c]!!.first - x) < 1e-9 && kotlin.math.abs(q[c]!!.second - y) < 1e-9
+        assertTrue(near('q', 0.5, 0.7) && near('a', 1.0, 2.1) && near('z', 2.0, 3.5))
     }
 
     @Test fun customLongPressEntries() {
