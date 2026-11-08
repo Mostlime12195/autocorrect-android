@@ -80,6 +80,8 @@ tap_text() {  # tap the first UI element whose text starts with $1 (scrolling th
   echo "not found: $1"; return 1
 }
 adb shell input keyevent KEYCODE_BACK; sleep 2
+# settings are in sub-screens: Correction -> Correction mode (the test box stays above them)
+tap_text "Correction" && sleep 2
 if tap_text "Correction mode"; then
   sleep 2; tap_text "Suggest only" && echo "suggest-only mode on"; sleep 2
   for i in 1 2 3 4 5 6 7 8; do adb shell input swipe $((W / 2)) $((H / 3)) $((W / 2)) $((H * 3 / 4)) 200; done
