@@ -33,6 +33,8 @@ class DictionaryActivity : AppCompatActivity() {
     private lateinit var adapter: ArrayAdapter<String>
     private lateinit var box: TextInputEditText
     private lateinit var empty: TextView
+    /** words behind the list rows (rows of probation words carry a "learning" note) */
+    private var shownWords: List<String> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +64,7 @@ class DictionaryActivity : AppCompatActivity() {
         adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, ArrayList())
         val list = ListView(this).apply {
             this.adapter = this@DictionaryActivity.adapter
-            setOnItemClickListener { _, _, pos, _ -> confirmDelete(this@DictionaryActivity.adapter.getItem(pos) ?: return@setOnItemClickListener) }
+            setOnItemClickListener { _, _, pos, _ -> confirmDelete(shownWords.getOrNull(pos) ?: return@setOnItemClickListener) }
         }
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
@@ -86,9 +88,11 @@ class DictionaryActivity : AppCompatActivity() {
 
     private fun refresh() {
         val q = box.text?.toString()?.trim().orEmpty().lowercase()
-        val all = user.words().sortedBy { it.lowercase() }
+        val learning = user.probationWords().toSet()
+        val all = (user.words() + learning).sortedBy { it.lowercase() }
         val shown = if (q.isEmpty()) all else all.filter { q in it.lowercase() }
-        adapter.clear(); adapter.addAll(shown)
+        shownWords = shown
+        adapter.clear(); adapter.addAll(shown.map { if (it in learning) "$it  ·  learning (from your undos)" else it })
         empty.text = when {
             all.isEmpty() -> "No words yet. Add one above, tap \"not a typo\" on an underlined word, or long-press the word you typed in the suggestion strip."
             shown.isEmpty() -> "No match. Tap Add to add it."

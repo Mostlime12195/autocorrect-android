@@ -46,6 +46,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     /** the field (InputConnection) as the controller sees it; the cursor falls back to onUpdateSelection's */
     private val editor = IcEditor(this, { currentInputConnection }, { info }, { sendDownUpKeyEvents(it) }, { sendKeyChar(it) }) { lastSelStart }
     @Volatile private var lastSelStart = -1
+    /** a new id per input session (field focus): undo learning across sessions, probation */
+    private var inputSession = java.util.UUID.randomUUID().toString().take(8)
 
     private val engine = object : CorrectionEngine {
         override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) {
@@ -155,6 +157,21 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         override fun suppress(typed: String, chosen: String) = app.user.suppress(typed, chosen)
         override fun penalty(typed: String, chosen: String) = app.user.penalty(typed, chosen)
         override fun noteSpellingUndo(typed: String) = if (app.prefs.learnUndo) app.user.noteSpellingUndo(typed) else 0
+        override fun shouldLearn(typed: String, typoLike: Boolean) = app.prefs.learnUndo && app.user.shouldLearn(typed, inputSession, typoLike)
+        override fun addLearned(w: String) = app.user.addProbation(w, inputSession)
+        override fun seenTyped(w: String) { app.user.seenTyped(w, inputSession) }
+        /** edit distance <= 2 from one of the 20k most frequent lexicon words (only asked on an undo) */
+        override fun nearCommonWord(w: String): Boolean {
+            val lex = EngineHolder.corrector?.lex ?: return true
+            val t = w.lowercase()
+            if (lex.index.containsKey(t)) return false
+            val n = minOf(lex.size, 20_000)
+            for (i in 0 until n) {
+                val c = lex.words[i]
+                if (kotlin.math.abs(c.length - t.length) <= 2 && dev.mostlime.autocorrect.engine.UserData.editDistance(c, t, 2) <= 2) return true
+            }
+            return false
+        }
     }
 
     private val ui = object : ControllerUi {
@@ -263,6 +280,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         app.prefs.reload()   // settings live in the app process
         info = editorInfo
         lastSelStart = editorInfo?.initialSelStart?.takeIf { it >= 0 && it == editorInfo.initialSelEnd } ?: -1
+        if (!restarting) inputSession = java.util.UUID.randomUUID().toString().take(8)
         val policy = FieldPolicy.of(editorInfo)
         val o = app.prefs.layoutOptions()
         if (o != layoutOpts) {

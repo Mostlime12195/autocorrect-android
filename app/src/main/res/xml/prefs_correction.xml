@@ -7,6 +7,7 @@
         <SwitchPreferenceCompat app:key="confident_only" app:title="Only auto-correct when confident" app:defaultValue="false"
             app:summary="Unsure corrections are underlined and suggested instead of applied" app:iconSpaceReserved="false" />
         <SwitchPreferenceCompat app:key="flag_typos" app:title="Flag likely typos" app:persistent="false" app:iconSpaceReserved="false" />
+        <Preference app:key="spell_checker" app:title="Underlines in every app (system spell checker)" app:iconSpaceReserved="false" />
         <ListPreference app:key="style" app:title="Style" app:defaultValue="standard"
             app:entries="@array/styles" app:entryValues="@array/style_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
         <Preference app:key="punct_info" app:title="Punctuation" app:summary="Formal style adds commas as you type; full stops only after a pause, once the next words show a new sentence started." app:selectable="false" app:iconSpaceReserved="false" />

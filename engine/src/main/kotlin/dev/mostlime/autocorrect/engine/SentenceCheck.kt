@@ -38,30 +38,36 @@ object SentenceCheck {
               cancelled: () -> Boolean = { false }): List<SentenceFix> {
         val words = SEG.findAll(req.sentence).take(MAX_WORDS).toList()
         val out = ArrayList<SentenceFix>()
-        val user = c.user
-        for ((i, w) in words.withIndex()) {
+        for (i in words.indices) {
             if (cancelled()) break
-            if (user != null && user.has(w.value)) continue
-            val full = c.candidates(w.value, null)
-            if (full.typedIdx < 0 || c.canSkip(full)) continue
-            val s = full.subset(c.lmSubset(full))
-            val ti = s.typedIdx
-            if (ti < 0 || s.cands.size < 2) continue
-            val before = req.left + req.sentence.substring(0, w.range.first)
-            val lastWord = SEG.findAll(before).lastOrNull()
-            val left = if (lastWord == null) "" else before.substring(0, lastWord.range.last + 1)
-            val sep = before.substring(left.length)
-            val endRight = if (i + RIGHT_WORDS < words.size) words[i + RIGHT_WORDS].range.first else req.sentence.length
-            val right = req.sentence.substring(w.range.last + 1, endRight).trimEnd()
-            val lp = scorer.score(s.cands.map { LmReq(left, sep + it + right) })
-            val (k0, sc) = choose(s, lp, p.lamRe, p.bias, p.pen)
-            var k = k0
-            if (user != null && k != ti) { val pen = user.penalty(s.typed, s.cands[k]); if (pen > 0) { sc[k] -= pen; k = sc.indices.maxBy { sc[it] } } }
-            val gap = sc[k] - sc[ti]
-            if (k == ti || gap < minGap) continue
-            val fixes = s.cands.indices.sortedByDescending { sc[it] }.map { s.cands[it] }.filter { it.lowercase() != w.value.lowercase() }.distinct().take(3)
-            if (fixes.isNotEmpty()) out.add(SentenceFix(w.range.first, w.value, s.cands[k], gap, fixes))
+            checkWord(c, req, words, i, scorer, p, minGap)?.let { out.add(it) }
         }
         return out
+    }
+
+    /** one word of the sentence (words = SEG matches of req.sentence); a caller can run words as separate jobs */
+    fun checkWord(c: Corrector, req: SentenceReq, words: List<MatchResult>, i: Int, scorer: LmScorer, p: DecodeParams, minGap: Double): SentenceFix? {
+        val w = words[i]
+        val user = c.user
+        if (user != null && user.has(w.value)) return null
+        val full = c.candidates(w.value, null)
+        if (full.typedIdx < 0 || c.canSkip(full)) return null
+        val s = full.subset(c.lmSubset(full))
+        val ti = s.typedIdx
+        if (ti < 0 || s.cands.size < 2) return null
+        val before = req.left + req.sentence.substring(0, w.range.first)
+        val lastWord = SEG.findAll(before).lastOrNull()
+        val left = if (lastWord == null) "" else before.substring(0, lastWord.range.last + 1)
+        val sep = before.substring(left.length)
+        val endRight = if (i + RIGHT_WORDS < words.size) words[i + RIGHT_WORDS].range.first else req.sentence.length
+        val right = req.sentence.substring(w.range.last + 1, endRight).trimEnd()
+        val lp = scorer.score(s.cands.map { LmReq(left, sep + it + right) })
+        val (k0, sc) = choose(s, lp, p.lamRe, p.bias, p.pen)
+        var k = k0
+        if (user != null && k != ti) { val pen = user.penalty(s.typed, s.cands[k]); if (pen > 0) { sc[k] -= pen; k = sc.indices.maxBy { sc[it] } } }
+        val gap = sc[k] - sc[ti]
+        if (k == ti || gap < minGap) return null
+        val fixes = s.cands.indices.sortedByDescending { sc[it] }.map { s.cands[it] }.filter { it.lowercase() != w.value.lowercase() }.distinct().take(3)
+        return if (fixes.isEmpty()) null else SentenceFix(w.range.first, w.value, s.cands[k], gap, fixes)
     }
 }

@@ -129,6 +129,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 if (!app.prefs.sp.contains(Prefs.FLAG_TYPOS)) flagSw?.isChecked = v == "suggest"
                 true
             }
+            findPreference<Preference>("spell_checker")?.setOnPreferenceClickListener { openSpellCheckerSettings(); true }
             findPreference<Preference>("clear_learned")?.setOnPreferenceClickListener {
                 app.user.clearLearned(); Toast.makeText(requireContext(), "Undone edits forgotten", Toast.LENGTH_SHORT).show(); true
             }
@@ -203,6 +204,23 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
         private var download: WorkInfo? = null
 
         private fun showDownload(w: WorkInfo?) { download = w; refresh() }
+
+        /** the system spell checker screen (no public action: the Settings activity, else Languages & input) */
+        private fun openSpellCheckerSettings() {
+            val tries = listOf(
+                Intent().setClassName("com.android.settings", "com.android.settings.Settings\$SpellCheckersSettingsActivity"),
+                Intent(Settings.ACTION_INPUT_METHOD_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS),
+            )
+            for (i in tries) if (runCatching { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+        }
+
+        private fun spellCheckerSummary(): String {
+            val sel = runCatching { Settings.Secure.getString(requireContext().contentResolver, "selected_spell_checker") }.getOrNull().orEmpty()
+            val ours = sel.startsWith(requireContext().packageName + "/")
+            return (if (ours) "On: Keylime is the spell checker. " else "") +
+                "Red underlines with a fix menu in apps' text fields. Pick Keylime in Settings → System → Languages → Spell checker."
+        }
 
         // ------------------------------------------------------------------ performance
         /** widgets of the Performance screen: not persisted by themselves; a change switches the preset to custom */
@@ -470,6 +488,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 val st = withContext(Dispatchers.IO) { LogStats.compute(app.events.file, BuildConfig.VERSION_NAME, app.prefs.statsResetAt) }
                 findPreference<Preference>("stats")?.summary = st
             }
+            findPreference<Preference>("spell_checker")?.summary = spellCheckerSummary()
             app.user.reloadIfChanged()
             findPreference<Preference>("dictionary")?.summary = when (val n = app.user.size) {
                 0 -> "Words that are never corrected or flagged"

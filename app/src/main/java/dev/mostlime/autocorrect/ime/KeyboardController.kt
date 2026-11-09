@@ -81,6 +81,14 @@ interface Learning {
     fun penalty(typed: String, chosen: String): Double = 0.0
     /** -> spelling undos of this typed word so far */
     fun noteSpellingUndo(typed: String): Int = 0
+    /** quality guard: count this undo; true = learn the word now (see UserData.shouldLearn) */
+    fun shouldLearn(typed: String, typoLike: Boolean): Boolean = noteSpellingUndo(typed) >= 2 && !typoLike
+    /** a word learned from undos: on probation (protected, not suggested yet) */
+    fun addLearned(w: String): Boolean = addWord(w)
+    /** within edit distance 2 of a common lexicon word */
+    fun nearCommonWord(w: String): Boolean = false
+    /** a dictionary / probation word was typed and kept (probation words graduate when used in another session) */
+    fun seenTyped(w: String) {}
 }
 
 /** A finished swipe gesture: path in model units, the LM context, and the case pattern for the word ("A" shift, "AA" caps lock). */
@@ -260,6 +268,14 @@ class KeyboardController(
     /** word just added to the dictionary by repeated undos (strip offers to take it back) */
     private var dictAdded: String? = null
 
+    /**
+     * An auto-correction was just reverted with backspace. What counts is what the user does next: finishing the word
+     * as typed is a real undo (learned from); deleting it and typing the fix again is an accidental backspace (noise,
+     * nothing learned); anything else isn't a verdict on the fix either way.
+     */
+    private class PendingUndo(val word: String, val full: String, val out: String, val gap: Double, val ev: Map<String, Any?>?)
+    private var pendingUndo: PendingUndo? = null
+
     /** words already rewound (or reverted by the user) by their start in the position counter: never touched again */
     private val rewound = HashSet<Long>()
     private var rewindBusy = false
@@ -289,7 +305,7 @@ class KeyboardController(
         flushLast()
         config = cfg
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
-        typo = null; dictAdded = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
+        typo = null; dictAdded = null; pendingUndo = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
         chipFlag = null; spansDropped = false; marked.clear()
         idleToken?.let { timer.cancel(it) }; idleToken = null
         markToken?.let { timer.cancel(it) }; markToken = null
@@ -316,7 +332,7 @@ class KeyboardController(
         if (ed.hasSelection() || !ed.textBefore(composing.length + 1).endsWith(composing)) {
             ed.finishComposing()
             invalidatePendings()
-            resetWord(); last = null; prev = null; typo = null
+            resetWord(); last = null; prev = null; typo = null; pendingUndo = null
             setStrip(emptyList(), -1, StripMode.NONE)
         }
     }
@@ -435,7 +451,8 @@ class KeyboardController(
                 l.event?.let { it["outcome"] = "undone"; it["final"] = l.typed; write(it) }
                 last = null; prev = null
                 setStrip(emptyList(), -1, StripMode.NONE)
-                learnFromUndo(l.undoPrefix + l.typed, l.out, l.event)
+                // learned from only if the word as typed then stays (see PendingUndo)
+                pendingUndo = PendingUndo(l.typed, l.undoPrefix + l.typed, l.out, gapOf(l.result), l.event)
                 return
             }
         }
@@ -448,6 +465,13 @@ class KeyboardController(
     // ------------------------------------------------------------------ word end
     private fun finishWord(ed: Editor, sepText: String, trigger: Boolean) {
         flushLast()
+        pendingUndo?.let { pu ->
+            pendingUndo = null
+            val now = composing.toString()
+            if (now == pu.word) learnFromUndo(pu.full, pu.out, pu.ev, pu.gap)
+            // now == pu.out (retyped the fix) or something else: not a rejection, nothing learned
+        }
+        composing.toString().takeIf { it.isNotEmpty() && learning.isUserWord(it) }?.let { learning.seenTyped(it) }
         cancelSuggest()
         val typed = composing.toString()
         val tch = ArrayList(touches)
@@ -1087,7 +1111,7 @@ class KeyboardController(
             return
         }
         cursorFlag = f
-        setStrip(f.fixes, 0, StripMode.TYPO, hint = "typo?", action = if (f.spelling) "not a typo" else "ignore")
+        setStrip(f.fixes, 0, StripMode.TYPO, hint = "typo?", action = "not a typo")
     }
 
     /** is f.word still at f.start (cursor at cur)? else look for it nearby and move the flag; false = gone */
@@ -1188,15 +1212,24 @@ class KeyboardController(
      * An auto edit was undone. Spelling: count it; the second undo of the same typed word adds it to the dictionary.
      * Anything else (grammar guard): never the dictionary, only a suppression of this edit for a while.
      */
-    private fun learnFromUndo(typed: String, out: String, ev: Map<String, Any?>?) {
+    private fun learnFromUndo(typed: String, out: String, ev: Map<String, Any?>?, gap: Double = 0.0) {
         if (learning.isUserWord(typed) || typed == out) return
         if (isSpellingEdit(typed, out)) {
-            if (learning.noteSpellingUndo(typed) >= UNDOS_TO_ADD && learning.addWord(typed)) {
+            // looks like a typo of a common word that the model was sure about: needs undos in two sessions
+            val typoLike = gap >= STRONG_GAP && learning.nearCommonWord(typed)
+            if (learning.shouldLearn(typed, typoLike) && learning.addLearned(typed)) {
                 dictAdded = typed
                 ui.onDictAdded(typed)
                 // a toast says so; the word can be removed in settings (no extra pill in the strip)
             }
         } else suppressEdit(typed, out, "undo", ev)
+    }
+
+    /** how much the model preferred its fix over the word as typed (score units; big = sure) */
+    private fun gapOf(r: WordResult?): Double {
+        r ?: return 0.0
+        val ti = r.slot.typedIdx
+        return if (ti < 0) Double.POSITIVE_INFINITY else r.scores[r.chosen] - r.scores[ti]
     }
 
     private fun suppressEdit(typed: String, chosen: String, source: String, ev: Map<String, Any?>?) {
@@ -1441,6 +1474,8 @@ class KeyboardController(
         /** "only auto-correct when confident": the choice must beat every other candidate by this much (WordResult.margin) */
         const val CONFIDENT_MARGIN = 3.0
         const val UNDOS_TO_ADD = 2
+        /** the model "strongly prefers" its fix above this gap (score units) */
+        const val STRONG_GAP = 4.0
 
         fun r3(x: Double) = Math.round(x * 1000.0) / 1000.0
 

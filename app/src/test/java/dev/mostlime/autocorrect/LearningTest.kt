@@ -92,7 +92,13 @@ class LearningTest {
         override fun suppress(typed: String, chosen: String) = user.suppress(typed, chosen)
         override fun penalty(typed: String, chosen: String) = user.penalty(typed, chosen)
         override fun noteSpellingUndo(typed: String) = user.noteSpellingUndo(typed)
+        override fun shouldLearn(typed: String, typoLike: Boolean) = user.shouldLearn(typed, session, typoLike)
+        override fun addLearned(w: String) = user.addProbation(w, session)
+        override fun seenTyped(w: String) { user.seenTyped(w, session) }
+        override fun nearCommonWord(w: String) = nearCommon
     }
+    private var session = "s1"
+    private var nearCommon = false
     private val ctl = KeyboardController({ ed }, engine, object : ControllerUi {
         override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
         override fun setShift(shift: Shift) {}
@@ -262,7 +268,7 @@ class LearningTest {
 
     @Test fun autoAddShowsNoPill() {
         start()
-        repeat(2) { type("fized "); engine.deliver(); type("\b") ; if (it == 0) type(" ") }
+        repeat(2) { type("fized "); engine.deliver(); type("\b"); type(" ") }
         assertTrue(user.has("fized"))
         assertEquals(null, ctl.shownAction)
     }
@@ -401,6 +407,38 @@ class LearningTest {
         assertEquals("so teh quick ", ed.text.toString())
         timer.fireAll()
         assertTrue(ed.marks.isNotEmpty())
+    }
+
+    /** undo then retyping the fix is an accidental backspace: nothing is learned from it */
+    @Test fun accidentalBackspaceIsNotARejection() {
+        start()
+        repeat(3) {
+            type("fized "); engine.deliver()
+            type("\b")                                      // reverted to "fized" (composing)
+            type("\b\b\b\b\bfixed ")                         // ...and the fix typed again right away
+        }
+        assertFalse(user.has("fized"))
+        // a real undo (the word as typed stays) still counts
+        repeat(2) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        assertTrue(user.has("fized"))
+    }
+
+    /** a typo of a common word the model was sure about needs undos in two sessions, and then starts on probation */
+    @Test fun typoLookingWordsNeedTwoSessionsAndProbation() {
+        nearCommon = true
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))   // strong preference
+        start()
+        repeat(3) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        assertFalse("same session: not learned", user.has("fized"))
+        session = "s2"; start()
+        type("fized "); engine.deliver(); type("\b"); type(" ")
+        assertTrue(user.has("fized"))
+        assertEquals(listOf("fized"), user.probationWords())     // on probation: protected, not suggested yet
+        assertTrue(user.near("fizrd").isEmpty())
+        session = "s3"; start()
+        type("fized ")                                           // used in another session: graduates
+        assertTrue(user.words().contains("fized"))
+        assertTrue(user.probationWords().isEmpty())
     }
 
     @Test fun spellingClassification() {
