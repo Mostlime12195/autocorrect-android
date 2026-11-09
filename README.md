@@ -67,6 +67,13 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
   phones (< 4.5 GB or flagged low-RAM) and on phones with only small cores (A53 / A55 class).
 - Suggest-only keeps every flagged word underlined (SuggestionSpan); in apps that ignore it, putting the cursor on or
   next to a flagged word shows its fixes in the strip (offsets are tracked per field and re-found when text moves).
+- Settings -> Performance: presets (Battery saver, Balanced, Max, Custom) over context length (64 - 1024 tokens; the
+  graphs have RoPE positions for 1024, so the context is clamped to 976 to leave room for what's scored after it; the
+  window's start moves in quarter-window chunks so the KV cache keeps being extended instead of recomputed), pause
+  before the idle re-check (0.2 - 3 s), re-check every N words, whole-field re-check (sentence-cached), candidates per
+  word, LM skip on confident words, model, ORT threads; a usage meter (ms per word avg / p95, ms per re-check, passes
+  per minute, keyboard CPU %, a warning when re-checks take longer than the pause). Underlines still wait for 1.5 s
+  without typing.
 - Suggestion strip: top 3. While typing it shows cheap suggestions (spatial + word frequency); after a correction it
   shows the alternatives, and tapping one replaces the corrected word.
 - Models (downloaded on first run, see below): m2 106M int4 (default; trained with a style control token: casual /

@@ -72,4 +72,38 @@
         <item>left</item>
         <item>right</item>
     </string-array>
+    <string-array name="perf_presets">
+        <item>Battery saver</item>
+        <item>Balanced</item>
+        <item>Max</item>
+        <item>Custom</item>
+    </string-array>
+    <string-array name="perf_presets_values">
+        <item>battery</item>
+        <item>balanced</item>
+        <item>max</item>
+        <item>custom</item>
+    </string-array>
+    <string-array name="ort_threads">
+        <item>Auto (big cores)</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>4</item>
+        <item>5</item>
+        <item>6</item>
+        <item>7</item>
+        <item>8</item>
+    </string-array>
+    <string-array name="ort_threads_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>4</item>
+        <item>5</item>
+        <item>6</item>
+        <item>7</item>
+        <item>8</item>
+    </string-array>
 </resources>

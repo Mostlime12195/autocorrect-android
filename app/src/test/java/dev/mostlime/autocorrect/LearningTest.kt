@@ -55,8 +55,11 @@ class LearningTest {
         var wordLm: LmScorer = lm
         var rewindLm: LmScorer = lm
         val pendingRewinds = ArrayList<Pair<List<dev.mostlime.autocorrect.engine.RewindTarget>, (List<dev.mostlime.autocorrect.engine.RewindChange>) -> Unit>>()
-        override fun checkSentences(reqs: List<dev.mostlime.autocorrect.engine.SentenceReq>, done: (List<List<dev.mostlime.autocorrect.engine.SentenceFix>>?) -> Unit) =
+        var checks = 0
+        override fun checkSentences(reqs: List<dev.mostlime.autocorrect.engine.SentenceReq>, done: (List<List<dev.mostlime.autocorrect.engine.SentenceFix>>?) -> Unit) {
+            checks++
             done(reqs.map { dev.mostlime.autocorrect.engine.SentenceCheck.check(corrector, it, rewindLm, P, KeyboardController.FLAG_MARGIN) })
+        }
         fun deliverRewinds() {
             while (pendingRewinds.isNotEmpty()) {
                 val (t, d) = pendingRewinds.removeAt(0)
@@ -385,6 +388,19 @@ class LearningTest {
         assertEquals(a + b, ed.text.toString())
         assertTrue(ed.marks.isEmpty())
         assertEquals("no more re-commits once the field dropped a span", editsAfterPause, ed.edits)
+    }
+
+    /** "re-check every N words": runs as results come in, no pause needed; marks still wait for a quiet moment */
+    @Test fun periodicRecheckRunsWithoutAPause() {
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "test" }, "t",
+            suggestOnly = true, recheckEvery = 2))
+        type("so teh quick ")
+        engine.deliver()
+        assertTrue("checks ${engine.checks}", engine.checks >= 1)
+        assertTrue(ed.marks.isEmpty())
+        assertEquals("so teh quick ", ed.text.toString())
+        timer.fireAll()
+        assertTrue(ed.marks.isNotEmpty())
     }
 
     @Test fun spellingClassification() {

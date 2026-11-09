@@ -9,7 +9,12 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 
+/** default left context (tokens, incl. EOS / style) */
 const val MAX_CTX = 64
+/** positions the step graphs have RoPE for (cos / sin tables of m2 and m1 are [1024, 32]) */
+const val MAX_POS = 1024
+/** room kept for what's scored after the context (candidate + next word, a sentence check's right context) */
+const val POS_MARGIN = 48
 const val EOT = "\u0003"   // continuation suffix = end of message: score </s> instead of the word boundary
 
 /** One LM request: log P(cont + word boundary | left). */
@@ -277,8 +282,18 @@ class NeuralScorer(
     val tok: SPTokenizer,
     val step: StepModel,
     var styleId: Int? = null,
-    private val cacheSize: Int = 16,
+    private var cacheSize: Int = 16,
 ) : LmScorer {
+    /**
+     * Left context in tokens (64 .. MAX_POS - POS_MARGIN). Longer contexts are clipped in chunks of maxCtx / 4 from the
+     * front, so the window start only moves now and then and the cached prefix (KV state) keeps being extended instead
+     * of recomputed for every word. The prefix cache shrinks with it (each entry holds the whole KV state).
+     */
+    var maxCtx: Int = MAX_CTX
+        set(v) {
+            val c = v.coerceIn(16, MAX_POS - POS_MARGIN)
+            if (c != field) { field = c; cacheSize = (16 * MAX_CTX / c).coerceIn(4, 16); clearCache() }
+        }
     private val cache = LinkedHashMap<String, Pair<IntArray, LmState>>(32, 0.75f, true)
     var tokensRun = 0L
         private set
@@ -292,12 +307,14 @@ class NeuralScorer(
         return intArrayOf(tok.eosId) + body
     }
 
+    private fun dropFor(size: Int, keep: Int) = Companion.dropFor(size, keep)
+
     private fun clip(ctx: IntArray): IntArray {
-        val sid = styleId ?: return if (ctx.size > MAX_CTX) ctx.copyOfRange(ctx.size - MAX_CTX, ctx.size) else ctx
+        val sid = styleId ?: return dropFor(ctx.size, maxCtx).let { d -> if (d == 0) ctx else ctx.copyOfRange(d, ctx.size) }
         // [EOS, STYLE] + last tokens
         val body = ctx.copyOfRange(1, ctx.size)
-        val keep = MAX_CTX - 2
-        val tail = if (body.size > keep) body.copyOfRange(body.size - keep, body.size) else body
+        val d = dropFor(body.size, maxCtx - 2)
+        val tail = if (d == 0) body else body.copyOfRange(d, body.size)
         return intArrayOf(tok.eosId, sid) + tail
     }
 
@@ -404,6 +421,16 @@ class NeuralScorer(
     }
 
     fun clearCache() = cache.clear()
+
+    companion object {
+        /** front tokens to drop so `size` fits `keep`: a multiple of the chunk (stable window start between jumps) */
+        fun dropFor(size: Int, keep: Int): Int {
+            if (size <= keep) return 0
+            if (keep <= MAX_CTX) return size - keep   // short windows: the old exact clip (cheap to recompute)
+            val chunk = maxOf(8, keep / 4)
+            return ((size - keep + chunk - 1) / chunk) * chunk
+        }
+    }
 
     override fun score(reqs: List<LmReq>): DoubleArray {
         calls++

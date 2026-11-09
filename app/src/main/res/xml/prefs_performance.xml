@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+    <ListPreference app:key="perf_preset" app:title="Preset" app:persistent="false"
+        app:entries="@array/perf_presets" app:entryValues="@array/perf_presets_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+    <Preference app:key="perf_meter" app:title="Usage" app:selectable="false" app:iconSpaceReserved="false" />
+    <Preference app:key="perf_meter_reset" app:title="Reset the meter" app:iconSpaceReserved="false" />
+
+    <PreferenceCategory app:title="Corrections" app:iconSpaceReserved="false">
+        <SeekBarPreference app:key="ctx_tokens" app:title="Context length (tokens)" app:persistent="false" android:max="1024" app:min="64"
+            app:seekBarIncrement="64" app:showSeekBarValue="true" app:summary="How much of the text before the word the model reads" app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="lm_topk" app:title="Candidates scored per word" app:persistent="false" android:max="16" app:min="2"
+            app:showSeekBarValue="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="lm_skip" app:title="Skip the model on confident words" app:persistent="false"
+            app:summary="Common, correctly typed words don't go through the model" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Re-checking" app:iconSpaceReserved="false">
+        <SeekBarPreference app:key="idle_pause_ms" app:title="Pause before re-checking (ms)" app:persistent="false" android:max="3000" app:min="200"
+            app:seekBarIncrement="100" app:showSeekBarValue="true" app:summary="Whole sentences are re-checked after this long without typing" app:iconSpaceReserved="false" />
+        <SeekBarPreference app:key="recheck_every" app:title="Also re-check every N words" app:persistent="false" android:max="10" app:min="0"
+            app:showSeekBarValue="true" app:summary="0 = only after a pause. The next key still cancels a re-check." app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="recheck_field" app:title="Re-check the whole field" app:persistent="false"
+            app:summary="Off: the sentences near the cursor. Unchanged sentences are never re-checked." app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Model" app:iconSpaceReserved="false">
+        <ListPreference app:key="model" app:title="Model" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat app:key="battery_saver" app:title="Lite model (m1 34M)" app:iconSpaceReserved="false" />
+        <ListPreference app:key="ort_threads" app:title="Threads" app:persistent="false"
+            app:entries="@array/ort_threads" app:entryValues="@array/ort_threads_values" app:useSimpleSummaryProvider="true" app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+</PreferenceScreen>

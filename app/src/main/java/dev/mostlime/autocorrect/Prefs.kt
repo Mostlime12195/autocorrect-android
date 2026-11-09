@@ -89,6 +89,36 @@ class Prefs(private val ctx: Context) {
     /** two undos of the same spelling fix add the word to the dictionary */
     val learnUndo get() = sp.getBoolean(LEARN_UNDO, true)
 
+    // performance (settings -> Performance): a preset, or "custom" with every value set
+    val perfPreset get() = sp.getString(PERF_PRESET, "balanced") ?: "balanced"
+    private fun perf(key: String): Int =
+        if (perfPreset == "custom" && sp.contains(key)) sp.getInt(key, 0) else (PRESETS[perfPreset] ?: PRESETS["balanced"]!!)[key] ?: 0
+    /** left context for the model, tokens (64 .. 1024; the graphs clamp to MAX_POS - POS_MARGIN) */
+    val ctxTokens get() = perf(CTX_TOKENS).coerceIn(64, 1024)
+    /** pause in typing before the idle re-check (suggest-only sentence check / far rewind), ms */
+    val idlePauseMs get() = perf(IDLE_PAUSE).coerceIn(200, 3000).toLong()
+    /** also re-check every N finished words without waiting for a pause (0 = off) */
+    val recheckEvery get() = perf(RECHECK_EVERY).coerceIn(0, 20)
+    /** re-check the whole field (1) or the sentences near the cursor (0) */
+    val wholeField get() = perf(RECHECK_FIELD) == 1
+    /** ORT intra-op threads (0 = auto: the big cores) */
+    val ortThreads get() = perf(ORT_THREADS).coerceIn(0, 8)
+    /** candidates the model scores per word */
+    val lmTopK get() = perf(LM_TOPK).coerceIn(2, 24)
+    /** skip the model on confident, correctly spelled common words (1) or score every word (0) */
+    val lmSkip get() = perf(LM_SKIP) == 1
+
+    /** switch to a preset (its values) or to custom with the current values written out */
+    fun setPerfPreset(p: String) {
+        val e = sp.edit()
+        if (p == "custom") {
+            val cur = mapOf(CTX_TOKENS to ctxTokens, IDLE_PAUSE to idlePauseMs.toInt(), RECHECK_EVERY to recheckEvery,
+                RECHECK_FIELD to (if (wholeField) 1 else 0), ORT_THREADS to ortThreads, LM_TOPK to lmTopK, LM_SKIP to (if (lmSkip) 1 else 0))
+            for ((k, v) in cur) e.putInt(k, v)
+        }
+        e.putString(PERF_PRESET, p).commit()
+    }
+
     /** in-app updates: last latest.json seen, auto-download (default on), last version notified */
     var latestJson: String?
         get() = sp.getString(LATEST_JSON, null)
@@ -161,6 +191,21 @@ class Prefs(private val ctx: Context) {
         const val LONG_PRESS_MS = "longpress_ms"
         const val LEARN_UNDO = "learn_undo"
         const val LATEST_JSON = "update_latest_json"
+        const val PERF_PRESET = "perf_preset"
+        const val CTX_TOKENS = "ctx_tokens"
+        const val IDLE_PAUSE = "idle_pause_ms"
+        const val RECHECK_EVERY = "recheck_every"
+        const val RECHECK_FIELD = "recheck_field"
+        const val ORT_THREADS = "ort_threads"
+        const val LM_TOPK = "lm_topk"
+        const val LM_SKIP = "lm_skip"
+        /** Balanced = the behaviour before these settings, except the context: 256 tokens (1024 measured ~4x slower per word) */
+        const val BALANCED_CTX = 256
+        val PRESETS: Map<String, Map<String, Int>> = mapOf(
+            "battery" to mapOf(CTX_TOKENS to 64, IDLE_PAUSE to 1500, RECHECK_EVERY to 0, RECHECK_FIELD to 0, ORT_THREADS to 2, LM_TOPK to 4, LM_SKIP to 1),
+            "balanced" to mapOf(CTX_TOKENS to BALANCED_CTX, IDLE_PAUSE to 400, RECHECK_EVERY to 0, RECHECK_FIELD to 0, ORT_THREADS to 0, LM_TOPK to 6, LM_SKIP to 1),
+            "max" to mapOf(CTX_TOKENS to 1024, IDLE_PAUSE to 200, RECHECK_EVERY to 2, RECHECK_FIELD to 1, ORT_THREADS to 0, LM_TOPK to 12, LM_SKIP to 0),
+        )
         const val AUTO_UPDATE = "auto_update"
         const val UPDATE_NOTIFIED = "update_notified"
 

@@ -7,6 +7,7 @@ import dev.mostlime.autocorrect.App
 import dev.mostlime.autocorrect.engine.CandidateGenerator
 import dev.mostlime.autocorrect.engine.CandidateGeneratorV2
 import dev.mostlime.autocorrect.engine.Corrector
+import dev.mostlime.autocorrect.engine.CorrectorConfig
 import dev.mostlime.autocorrect.engine.DecodeParams
 import dev.mostlime.autocorrect.engine.Lexicon
 import dev.mostlime.autocorrect.engine.DeviceCpu
@@ -62,8 +63,27 @@ object EngineHolder {
         }
     }
 
-    /** ORT intra-op threads: the big cores (up to 4), or 4 on all-little SoCs (DeviceCpu) */
+    /** ORT intra-op threads, auto: the big cores (up to 4), or 4 on all-little SoCs (DeviceCpu) */
     val THREADS = DeviceCpu.intraOpThreads()
+    /** threads the current session was opened with */
+    @Volatile var sessionThreads = 0
+        private set
+    private fun wantThreads(app: App) = app.prefs.ortThreads.takeIf { it > 0 } ?: THREADS
+
+    /**
+     * Performance settings (input start, engine thread): context length, candidates per word, LM skip. A thread count
+     * change reloads the session (preload notices it).
+     */
+    fun applyPerf(app: App) {
+        val ctx = app.prefs.ctxTokens; val topK = app.prefs.lmTopK; val skip = app.prefs.lmSkip
+        scope.launch {
+            scorer?.maxCtx = ctx
+            corrector?.let { c ->
+                val want = c.config.copy(lmTopK = topK, skipMargin = if (skip) CorrectorConfig.SKIP_MARGIN else Double.POSITIVE_INFINITY)
+                if (want != c.config) c.config = want
+            }
+        }
+    }
 
     @Volatile var corrector: Corrector? = null
         private set
@@ -115,7 +135,9 @@ object EngineHolder {
             val miss = runCatching {
                 app.assets.open("misspellings.tsv").bufferedReader().readLines().mapNotNull { l -> l.split('\t').takeIf { it.size >= 2 }?.let { it[0] to it[1] } }.toMap()
             }.getOrDefault(emptyMap())
-            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = spaceBar), misspellings = miss, user = app.user)
+            corrector = Corrector(gen, CandidateGeneratorV2(gen, spaceBarX = spaceBar), misspellings = miss, user = app.user,
+                config = CorrectorConfig(lmTopK = app.prefs.lmTopK,
+                    skipMargin = if (app.prefs.lmSkip) CorrectorConfig.SKIP_MARGIN else Double.POSITIVE_INFINITY))
             lexiconMs = App.now() - t0
             Log.i(TAG, "lexicon ${lex.size} words in $lexiconMs ms")
         }
@@ -142,7 +164,7 @@ object EngineHolder {
     private suspend fun ensureLoaded(app: App) {
         val want = runCatching { app.store.activeSpec() }.getOrNull() ?: return
         val cur = spec
-        if (cur != null && cur.id == want.id && cur.graph.sha256 == want.graph.sha256 && scorer?.step?.closed == false) {
+        if (cur != null && cur.id == want.id && cur.graph.sha256 == want.graph.sha256 && scorer?.step?.closed == false && sessionThreads == wantThreads(app)) {
             withContext(dispatcher) { applyStyle(app) }; return
         }
         if (!app.store.isInstalled(want)) return
@@ -153,11 +175,13 @@ object EngineHolder {
             val f = app.store.file(want.graph)
             val buf = RandomAccessFile(f, "r").use { it.channel.map(FileChannel.MapMode.READ_ONLY, 0, it.length()) }
             val env = OrtEnvironment.getEnvironment()
-            val step = StepModel.open(env, buf, want.meta, threads = THREADS,
+            val threads = wantThreads(app)
+            val step = StepModel.open(env, buf, want.meta, threads = threads,
                 ortFormat = want.format == "ort", extraConfig = want.sessionConfig)
             withContext(dispatcher) {
                 release()
-                scorer = NeuralScorer(tok, step)
+                scorer = NeuralScorer(tok, step).also { it.maxCtx = app.prefs.ctxTokens }
+                sessionThreads = threads
                 spec = want
                 sessionMs = App.now() - t0
                 if (!firstLoadDone) { coldLoadMs = App.now() - App.processStart; firstLoadDone = true }
@@ -165,7 +189,7 @@ object EngineHolder {
                 lastError = null
                 applyStyle(app)
             }
-            Log.i(TAG, "session ${want.id} ready in $sessionMs ms (cold load $coldLoadMs ms since process start), tree=${step.isTree}, threads $THREADS [${DeviceCpu.describe()}]")
+            Log.i(TAG, "session ${want.id} ready in $sessionMs ms (cold load $coldLoadMs ms since process start), tree=${step.isTree}, threads $threads [${DeviceCpu.describe()}], ctx ${app.prefs.ctxTokens}")
         } catch (e: Throwable) {
             lastError = e.toString()
             Log.e(TAG, "session load failed", e)

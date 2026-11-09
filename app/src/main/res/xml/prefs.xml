@@ -9,6 +9,7 @@
         <Preference app:key="screen_correction" app:title="Correction" app:summary="Style, auto-correct or suggest only" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
         <Preference app:key="screen_dictionary" app:title="Dictionary" app:summary="Your words, learning from undos" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
         <Preference app:key="screen_appearance" app:title="Appearance" app:summary="Theme, color, background, layout, keys" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
+        <Preference app:key="screen_performance" app:title="Performance" app:summary="Presets, context length, re-checking, threads, usage meter" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
         <Preference app:key="screen_model" app:title="Model" app:summary="Model choice, download, stats" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
         <Preference app:key="screen_privacy" app:title="Privacy and data" app:summary="Local log, opt-in sharing, delete my data" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />
         <Preference app:key="screen_updates" app:title="Updates" app:summary="Check for updates, auto-download" app:fragment="dev.mostlime.autocorrect.ui.SettingsActivity$Fragment" app:iconSpaceReserved="false" />

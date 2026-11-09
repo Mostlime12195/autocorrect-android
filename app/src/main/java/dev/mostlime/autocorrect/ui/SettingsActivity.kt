@@ -76,9 +76,11 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 "screen_privacy" -> R.xml.prefs_privacy
                 "screen_updates" -> R.xml.prefs_updates
                 "screen_about" -> R.xml.prefs_about
+                "screen_performance" -> R.xml.prefs_performance
                 else -> R.xml.prefs
             }, rootKey)
             setupAppearance()
+            setupPerformance()
             val m = app.store.manifest()
             findPreference<ListPreference>(Prefs.MODEL)?.apply {
                 entries = m.models.map { "${it.label} (${it.downloadBytes / 1_000_000} MB)" }.toTypedArray()
@@ -187,6 +189,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
 
         override fun onResume() {
             super.onResume()
+            if (screen == "screen_performance") { loadPerf(); view?.postDelayed(meterTick, 2000) }
             arguments?.getString(TITLE)?.let { (activity as? AppCompatActivity)?.supportActionBar?.apply { title = it; setDisplayHomeAsUpEnabled(true) } }
             refresh()
         }
@@ -200,6 +203,65 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
         private var download: WorkInfo? = null
 
         private fun showDownload(w: WorkInfo?) { download = w; refresh() }
+
+        // ------------------------------------------------------------------ performance
+        /** widgets of the Performance screen: not persisted by themselves; a change switches the preset to custom */
+        private fun setupPerformance() {
+            val preset = findPreference<ListPreference>(Prefs.PERF_PRESET) ?: return
+            val p = app.prefs
+            preset.value = p.perfPreset
+            preset.setOnPreferenceChangeListener { _, v -> p.setPerfPreset(v as String); view?.post { loadPerf() }; true }
+            fun custom(key: String, v: Int) {
+                if (p.perfPreset != "custom") p.setPerfPreset("custom")
+                p.sp.edit().putInt(key, v).commit()
+                preset.value = "custom"
+                view?.post { loadPerf() }
+            }
+            for (k in listOf(Prefs.CTX_TOKENS, Prefs.LM_TOPK, Prefs.IDLE_PAUSE, Prefs.RECHECK_EVERY))
+                findPreference<androidx.preference.SeekBarPreference>(k)?.setOnPreferenceChangeListener { _, v -> custom(k, v as Int); true }
+            for (k in listOf(Prefs.LM_SKIP, Prefs.RECHECK_FIELD))
+                findPreference<androidx.preference.SwitchPreferenceCompat>(k)?.setOnPreferenceChangeListener { _, v -> custom(k, if (v as Boolean) 1 else 0); true }
+            findPreference<ListPreference>(Prefs.ORT_THREADS)?.setOnPreferenceChangeListener { _, v -> custom(Prefs.ORT_THREADS, (v as String).toInt()); true }
+            findPreference<Preference>("perf_meter_reset")?.setOnPreferenceClickListener {
+                dev.mostlime.autocorrect.ime.PerfStats.file(requireContext()).delete(); showMeter(); true
+            }
+            loadPerf()
+        }
+
+        private fun loadPerf() {
+            val p = app.prefs
+            findPreference<androidx.preference.SeekBarPreference>(Prefs.CTX_TOKENS)?.value = p.ctxTokens
+            findPreference<androidx.preference.SeekBarPreference>(Prefs.LM_TOPK)?.value = p.lmTopK
+            findPreference<androidx.preference.SeekBarPreference>(Prefs.IDLE_PAUSE)?.value = p.idlePauseMs.toInt()
+            findPreference<androidx.preference.SeekBarPreference>(Prefs.RECHECK_EVERY)?.value = p.recheckEvery
+            findPreference<androidx.preference.SwitchPreferenceCompat>(Prefs.LM_SKIP)?.isChecked = p.lmSkip
+            findPreference<androidx.preference.SwitchPreferenceCompat>(Prefs.RECHECK_FIELD)?.isChecked = p.wholeField
+            findPreference<ListPreference>(Prefs.ORT_THREADS)?.value = p.ortThreads.toString()
+            findPreference<ListPreference>(Prefs.PERF_PRESET)?.value = p.perfPreset
+            showMeter()
+        }
+
+        /** the keyboard process writes perf_stats.json every few seconds while it works */
+        private fun showMeter() {
+            val pref = findPreference<Preference>("perf_meter") ?: return
+            val f = dev.mostlime.autocorrect.ime.PerfStats.file(requireContext())
+            val o = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(f.readText()) as kotlinx.serialization.json.JsonObject }.getOrNull()
+            if (o == null) { pref.summary = "No numbers yet: type something with the keyboard."; return }
+            fun d(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0
+            val interval = app.prefs.idlePauseMs
+            val sb = StringBuilder()
+            sb.append("Per word: %.0f ms average, %.0f ms p95 (%d words)".format(d("word_avg"), d("word_p95"), d("words").toInt()))
+            if (d("passes") > 0) sb.append("\nRe-check: %.0f ms per pass (p95 %.0f), %d in the last minute".format(d("pass_avg"), d("pass_p95"), d("passes_per_min").toInt()))
+            if (d("cpu") >= 0) sb.append("\nKeyboard CPU: %.0f%% of one core".format(d("cpu")))
+            if (d("pass_avg") > interval) sb.append("\n⚠ Falling behind: a re-check takes longer than the %d ms pause. Try a shorter context or a longer pause.".format(interval))
+            val age = (System.currentTimeMillis() - d("time").toLong()) / 1000
+            if (age > 30) sb.append("\n(%d s ago)".format(age))
+            pref.summary = sb.toString()
+        }
+
+        private val meterTick = object : Runnable {
+            override fun run() { if (isResumed && screen == "screen_performance") { showMeter(); view?.postDelayed(this, 2000) } }
+        }
 
         // ------------------------------------------------------------------ appearance
         private val pickImage = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->

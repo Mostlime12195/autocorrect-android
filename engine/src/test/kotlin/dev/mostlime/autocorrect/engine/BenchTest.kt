@@ -127,4 +127,59 @@ class BenchTest {
         dump?.close()
         step.close()
     }
+
+    /**
+     * Typing latency vs context length on one long text (the parity messages one after another, ~2k words): the left
+     * context is the keyboard's window (maxCtx * 5 chars, its start moved in quarter-window chunks like the controller)
+     * and the scorer clips to maxCtx tokens in chunks. ms per LM-scored word, avg and p95, over the words typed after
+     * the first 300 (window full).
+     * AC_BENCH_CTX="64,256,1024" AC_MODEL_DIR=<dir> [AC_GRAPH=m2s.step.int4t.ort] [AC_THREADS=n] [AC_WORDS=n]
+     */
+    @Test fun benchContext() {
+        val ctxs = System.getenv("AC_BENCH_CTX")?.split(',')?.map { it.trim().toInt() } ?: emptyList()
+        assumeTrue(ctxs.isNotEmpty())
+        val dir = System.getenv("AC_MODEL_DIR").orEmpty()
+        val name = System.getenv("AC_GRAPH") ?: "m2s.step.int4t.ort"
+        val f = File(dir, name)
+        assumeTrue(f.exists())
+        val meta = if (name.startsWith("lm_block4")) StepMeta(2, 64, 7, 384, (0 until 5).flatMap { listOf("k$it", "v$it") } + (0 until 9).map { "c$it" })
+            else StepMeta(2, 64, 7, 640, (0 until 6).flatMap { listOf("k$it", "v$it") } + (0 until 10).map { "c$it" })
+        val buf = RandomAccessFile(f, "r").use { it.channel.map(FileChannel.MapMode.READ_ONLY, 0, it.length()) }
+        val threads = System.getenv("AC_THREADS")?.toInt() ?: 2
+        val step = StepModel.open(OrtEnvironment.getEnvironment(), buf, meta, threads = threads, ortFormat = true)
+        val tok = if (name.startsWith("lm_block4")) Fixtures.tokM1 else Fixtures.tokM2
+        val corr = Corrector(Fixtures.gen, Fixtures.gen2)
+        val p = DecodeParams(1.25, 0.0, 0.0, 1.25)
+        val ref = Fixtures.json("pipeline_ref.json.gz").jsonObject
+        val msgs = PipelineTest.messages(ref)
+        val words = msgs.flatMap { m -> m.words.map { it.typed } }
+        val nWords = minOf(words.size, System.getenv("AC_WORDS")?.toInt() ?: 420)
+        println("context bench: $name, tree ${step.isTree}, threads $threads, ${words.size} words available, typing $nWords")
+        for (ctx in ctxs) {
+            val sc = NeuralScorer(tok, step).also { it.maxCtx = ctx }
+            val charWindow = maxOf(400, ctx * 5)
+            val chunk = maxOf(64, charWindow / 4)
+            val text = StringBuilder()
+            val ms = ArrayList<Double>()
+            var prev: PrevWord? = null
+            for (i in 0 until nWords) {
+                val w = words[i]
+                val sep = if (text.isEmpty()) "" else " "
+                val cp = text.length
+                val start = maxOf(0, ((cp - charWindow + chunk - 1) / chunk) * chunk)
+                val left = text.substring(start)
+                val t0 = System.nanoTime()
+                val r = corr.correctWord(WordInput(w, null, left, sep), sc, p, prev)
+                val dt = (System.nanoTime() - t0) / 1e6
+                if (i >= maxOf(300, nWords - 300) && r.lmScored) ms.add(dt)
+                text.append(sep).append(r.out)
+                prev = PrevWord(r.slot, r.chosen, left, sep, r.lmScored, if (r.lmScored) r.margin else 0.0, if (r.lmScored) r.scores else null)
+            }
+            ms.sort()
+            val avg = ms.average(); val p95 = ms[(ms.size * 0.95).toInt().coerceAtMost(ms.size - 1)]
+            println("ctx %4d tokens (window %d chars): %.1f ms/word avg, p95 %.1f ms, %d LM words, last ctx %d tokens".format(
+                ctx, charWindow, avg, p95, ms.size, sc.lastCtxTokens))
+        }
+        step.close()
+    }
 }

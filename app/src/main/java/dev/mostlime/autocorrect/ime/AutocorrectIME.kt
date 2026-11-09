@@ -114,6 +114,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                     val r = reqs.map { req -> if (!isActive) return@runCatching null
                         SentenceCheck.check(corr, req, sc, EngineHolder.params ?: DEFAULT_PARAMS, KeyboardController.FLAG_MARGIN) { !isActive } }
                     Log.i(TAG, "sentence check: ${reqs.size} sentences in ${App.now() - t0} ms")
+                    PerfStats.pass(App.now() - t0, this@AutocorrectIME)
                     r
                 }.getOrNull()
                 val ok = isActive
@@ -129,7 +130,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
                 val ch = if (sc == null || !isActive) emptyList() else runCatching {
                     Rewind.check(targets, sc, p.lamRe, Rewind.MARGIN, app.user, p.pen) { !isActive }
                 }.getOrDefault(emptyList())
-                if (sc != null) Log.i(TAG, "idle rewind: ${targets.size} targets in ${App.now() - t0} ms, ${ch.size} changes")
+                if (sc != null) { Log.i(TAG, "idle rewind: ${targets.size} targets in ${App.now() - t0} ms, ${ch.size} changes"); PerfStats.pass(App.now() - t0, this@AutocorrectIME) }
                 val ok = isActive
                 main.post { done(if (ok) ch else emptyList()) }
             }
@@ -163,6 +164,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         override fun onApplied() { kv?.flash() }
         override fun setShift(shift: Shift) { kv?.shift = shift }
         override fun onResult(r: WordResult?) {
+            if (r != null && !r.cheap) PerfStats.word(r.lmMs, this@AutocorrectIME)
             // timing only, never the text
             if (r != null) Log.i(TAG, "word -> " +
                 (if (r.cheap) "cheap" else if (r.skipped) "skip" else "LM") + " ${"%.0f".format(r.lmMs)}ms scored ${r.nScored}/${r.nCands} " +
@@ -296,12 +298,14 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         app.user.reloadIfChanged()   // the settings screen may have edited the dictionary
         ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME,
             suggestOnly = app.prefs.suggestOnly, confidentOnly = app.prefs.confidentOnly, autoCap = app.prefs.autoCap,
-            flagTypos = app.prefs.flagTypos))
+            flagTypos = app.prefs.flagTypos, idlePauseMs = app.prefs.idlePauseMs, recheckEvery = app.prefs.recheckEvery,
+            wholeField = app.prefs.wholeField, ctxChars = maxOf(KeyboardController.CTX_CHARS, app.prefs.ctxTokens * 5)))
         root?.hidePanel()
         if (!app.prefs.clipboard) clips.clear()
         updateClipChip()
         // cheap when loaded; picks up a model / style change or a finished download
         if (!EngineHolder.loading) EngineHolder.preload(this)
+        EngineHolder.applyPerf(app)
         updateStatus(null)
     }
 

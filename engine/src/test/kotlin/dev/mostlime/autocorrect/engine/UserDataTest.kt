@@ -39,6 +39,15 @@ class UserDataTest {
         assertEquals("Zorbix", d.decode(path).first().word)
     }
 
+    /** long contexts are clipped in chunks: the window start stays put while the text grows, so the KV cache is reused */
+    @Test fun longContextClipsInChunks() {
+        assertEquals(0, NeuralScorer.dropFor(900, 1000))
+        assertEquals(1, NeuralScorer.dropFor(65, 64))                 // short windows: exact
+        val starts = (1000..1400).map { NeuralScorer.dropFor(it, 1000) }.distinct()
+        assertTrue(starts.size <= 3, "$starts")                       // a few jumps of 250, not one per token
+        assertTrue((1000..1400).all { n -> n - NeuralScorer.dropFor(n, 1000) in 750..1000 })
+    }
+
     @Test fun suppressionsExpire() {
         var t = 1_000_000L
         val u = UserData(null, null) { t }

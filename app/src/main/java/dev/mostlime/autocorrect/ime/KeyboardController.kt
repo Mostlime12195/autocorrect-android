@@ -124,6 +124,14 @@ class ControllerConfig(
     val autoCap: Boolean = true,
     /** flag likely typos (marks + the side chip); off = suggest-only / unsure words just stay as typed */
     val flagTypos: Boolean = true,
+    /** pause in typing before the idle re-check (sentence check / far rewind) */
+    val idlePauseMs: Long = KeyboardController.IDLE_PAUSE_MS,
+    /** also re-check every N finished words, without a pause (0 = off); the next key still cancels it */
+    val recheckEvery: Int = 0,
+    /** re-check the whole field (sentence-cached) instead of the sentences near the cursor */
+    val wholeField: Boolean = false,
+    /** left context handed to the model, chars (the scorer clips to its token budget) */
+    val ctxChars: Int = KeyboardController.CTX_CHARS,
 )
 
 /**
@@ -284,6 +292,8 @@ class KeyboardController(
         typo = null; dictAdded = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
         chipFlag = null; spansDropped = false; marked.clear()
         idleToken?.let { timer.cancel(it) }; idleToken = null
+        markToken?.let { timer.cancel(it) }; markToken = null
+        pendingRemarks.clear(); wordsSinceCheck = 0; periodicDue = false
         swipeShift = null; swipePending = 0; swipeSpace = false
         releaseHold()
         shift = Shift.OFF
@@ -444,7 +454,7 @@ class KeyboardController(
         val cfg = config
         val canCorrect = trigger && cfg.policy.autocorrect && cfg.autocorrect && WORD_RE.matches(typed) && !keepTypedOnce
         // the text before the word, from the live editor (the composing word is the last thing before the cursor)
-        val raw = if (canCorrect) ed.textBefore(CTX_CHARS + typed.length) else ""
+        val raw = if (canCorrect) leftWindow(ed, typed.length) else ""
         val before = if (raw.endsWith(typed)) raw.dropLast(typed.length) else raw
         if (!canCorrect || !raw.endsWith(typed)) {
             ed.commit(typed + sepText)
@@ -472,6 +482,7 @@ class KeyboardController(
         while (pendings.size > MAX_PENDING) { val old = pendings.removeAt(0); old.done = true; stats.dropped++ }
         val req = CorrectionRequest(id, WordInput(typed, tch, left, sep), prevWord, if (prevWord != null && p != null) MergeInput(p.typed, p.touches) else null,
             formal = cfg.style == "formal" && !cfg.suggestOnly, autoCap = cfg.autoCap)
+        if (cfg.recheckEvery > 0 && ++wordsSinceCheck >= cfg.recheckEvery) periodicDue = true
         prev = null   // set again when this word's result is applied
         setStrip(emptyList(), -1, StripMode.NONE)
         showTypo()
@@ -522,6 +533,8 @@ class KeyboardController(
         }
         if (r != null && !r.cheap) scheduleRewind()   // the model is loaded (skipped words count too)
         idleTouch()
+        // re-check every N words: as soon as this word's result is in (the next key cancels it, like a pause would)
+        if (periodicDue && pendings.isEmpty() && !holding) onIdle()
     }
 
     // ------------------------------------------------------------------ idle passes (no word window)
@@ -533,19 +546,62 @@ class KeyboardController(
     /** auto mode: punctuation already proposed after a word (by its start in the counter) */
     private val punctTried = HashSet<Long>()
 
-    /** typing (or a result) happened: restart the idle timer, drop idle work in flight */
+    /** marks (underlines) wait for this long without typing: they're a same-text rewrite of the field */
+    private var markToken: Any? = null
+    /** sentence marks found by a re-check, attached at the next quiet moment (markIdle) */
+    private class Remark(val before: String, val after: String, val offset: Int, val text: String, val marks: List<TypoMark>)
+    private val pendingRemarks = ArrayList<Remark>()
+    private var wordsSinceCheck = 0
+    private var periodicDue = false
+
+    /** typing (or a result) happened: restart the idle timers, drop idle work in flight */
     private fun idleTouch() {
         idleToken?.let { timer.cancel(it) }
+        markToken?.let { timer.cancel(it) }
         engine.cancelIdle()
-        idleToken = timer.post(IDLE_MS) { idleToken = null; onIdle() }
+        idleToken = timer.post(config.idlePauseMs) { idleToken = null; onIdle() }
+        markToken = timer.post(MARK_MS) { markToken = null; onQuiet() }
         if (stripMode == StripMode.FLAG && composing.isNotEmpty()) setStrip(emptyList(), -1, StripMode.NONE)
     }
 
+    /** the re-check pass (pause, or every N words): text is read, nothing is written while typing */
     private fun onIdle() {
-        if (holding || pendings.isNotEmpty() || composing.isNotEmpty() || rewindBusy) return
+        if (holding || pendings.isNotEmpty() || rewindBusy) return
+        if (!config.policy.autocorrect || !config.autocorrect) return
+        wordsSinceCheck = 0; periodicDue = false
+        if (config.suggestOnly) { if (config.flagTypos) idleSuggest() } else idleRewind()
+    }
+
+    /** 1.5 s without typing: attach underlines (word flags + what the re-check found) */
+    private fun onQuiet() {
+        if (holding || pendings.isNotEmpty() || composing.isNotEmpty()) return
         if (!config.policy.autocorrect || !config.autocorrect) return
         markIdle()
-        if (config.suggestOnly) { if (config.flagTypos) idleSuggest() } else idleRewind()
+        applyRemarks()
+    }
+
+    /** the model's left context: up to ctxChars, its start moved in quarter-window chunks so the model's KV cache stays valid */
+    private fun leftWindow(ed: Editor, extra: Int): String {
+        val want = config.ctxChars + extra
+        if (config.ctxChars <= CTX_CHARS) return ed.textBefore(want)
+        val cp = ed.cursorPos()
+        if (cp < 0) return ed.textBefore(want)
+        val chunk = maxOf(64, config.ctxChars / 4)
+        val start = maxOf(0, ((cp - want + chunk - 1) / chunk) * chunk)
+        return ed.textBefore(cp - start)
+    }
+
+    private fun applyRemarks() {
+        if (pendingRemarks.isEmpty()) return
+        val ed = ed() ?: return
+        val todo = ArrayList(pendingRemarks); pendingRemarks.clear()
+        if (spansDropped || composing.isNotEmpty() || ed.hasSelection()) return
+        for (r in todo) {
+            val chars = r.before.length
+            if (ed.textBefore(chars) != r.before || ed.textAfter(r.after.length) != r.after) continue   // text moved on
+            ed.remark(r.offset, r.text, r.marks)
+        }
+        checkSpans(ed)
     }
 
     /**
@@ -579,8 +635,12 @@ class KeyboardController(
         if (config.policy.sensitive && config.policy.password) return
         val ed = ed() ?: return
         if (ed.hasSelection()) return
-        val before = ed.textBefore(IDLE_CHARS)
-        val after = ed.textAfter(IDLE_CHARS)
+        val chars = if (config.wholeField) FIELD_CHARS else IDLE_CHARS
+        // the word being typed is left out (a periodic re-check can run mid-word)
+        val beforeAll = ed.textBefore(chars + composing.length)
+        if (!beforeAll.endsWith(composing)) return
+        val before = beforeAll.dropLast(composing.length)
+        val after = if (composing.isEmpty()) ed.textAfter(chars) else ""
         val text = before + after
         val todo = ArrayList<Triple<IntRange, String, String>>()   // range, cache key, left
         for (r in SentenceCheck.split(text)) {
@@ -593,11 +653,12 @@ class KeyboardController(
         todo.sortBy { (r, _, _) -> if (r.last < before.length) before.length - r.last else r.first - before.length }
         val batch = todo.take(IDLE_SENTENCES)
         val snapPos = pos
+        val snapComp = composing.toString()
         engine.checkSentences(batch.map { (r, _, left) -> SentenceReq(left, text.substring(r)) }) { res ->
-            if (res == null || pos != snapPos || composing.isNotEmpty() || holding) return@checkSentences
+            if (res == null || pos != snapPos || composing.toString() != snapComp || holding) return@checkSentences
             val e2 = ed() ?: return@checkSentences
-            if (e2.textBefore(IDLE_CHARS) != before || e2.textAfter(IDLE_CHARS) != after || e2.hasSelection()) return@checkSentences
-            val cp = e2.cursorPos()
+            if (e2.textBefore(chars + snapComp.length) != beforeAll || (snapComp.isEmpty() && e2.textAfter(chars) != after) || e2.hasSelection()) return@checkSentences
+            val cp = e2.cursorPos().let { if (it >= 0) it - snapComp.length else it }
             for ((j, fixes) in res.withIndex()) {
                 val (r, key, left) = batch[j]
                 sentenceCache[key] = fixes
@@ -610,7 +671,9 @@ class KeyboardController(
                         old.firstOrNull { it.start == s0 + fx.start && it.word == fx.from }?.event,
                         (left + text.substring(r.first, r.first + fx.start)).takeLast(LOG_CONTEXT_CHARS)))
                 }
-                if (!spansDropped) e2.remark(r.first - before.length, text.substring(r), fixes.map { TypoMark(it.start, it.from.length, it.fixes) })
+                // underlines wait for a quiet moment (onQuiet): a re-check can run while the user is still typing
+                if (!spansDropped && snapComp.isEmpty()) pendingRemarks.add(Remark(before, after, r.first - before.length, text.substring(r),
+                    fixes.map { TypoMark(it.start, it.from.length, it.fixes) }))
                 // the strip's flagged word: drop it if this pass found it fine
                 val t = typo
                 if (t != null) {
@@ -621,9 +684,10 @@ class KeyboardController(
                     }
                 }
             }
-            checkSpans(e2)
+            if (markToken == null) applyRemarks()   // already quiet long enough
             if (stripMode == StripMode.NONE || stripMode == StripMode.FLAG) showFlagChip()
-            if (todo.size > batch.size) idleTouch()   // more sentences: next round
+            // more sentences: the next round right away (whole field) or after the next pause
+            if (todo.size > batch.size) { if (config.wholeField) timer.post(1) { onIdle() } else idleTouch() }
         }
     }
 
@@ -635,8 +699,11 @@ class KeyboardController(
         if (rewindBusy) return
         val ed = ed() ?: return
         if (ed.hasSelection()) return
-        val snap = ed.textBefore(CTX_CHARS)
-        val end = pos
+        val cur = composing.toString()
+        val raw = ed.textBefore(CTX_CHARS + cur.length)
+        if (!raw.endsWith(cur)) return
+        val snap = raw.dropLast(cur.length)
+        val end = pos - cur.length
         // the current sentence: back to the last . ! ? or newline (formal: the whole tail, so a missing full stop can land)
         val formal = config.style == "formal"
         val cut = if (formal) maxOf(snap.lastIndexOf('\n'), 0) else (snap.indexOfLast { it == '.' || it == '!' || it == '?' || it == '\n' } + 1)
@@ -1357,7 +1424,12 @@ class KeyboardController(
         val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")
         /** idle passes start after this pause in typing */
         /** idle passes (marks, sentence re-check, far rewind) only after this long without typing */
-        const val IDLE_MS = 1500L
+        /** marks (underlines) only after this long without typing */
+        const val MARK_MS = 1500L
+        /** default pause before the idle re-check */
+        const val IDLE_PAUSE_MS = 400L
+        /** "whole field" scope: everything readable (sentence-cached) */
+        const val FIELD_CHARS = 200_000
         const val IDLE_CHARS = 2000
         const val IDLE_LEFT = 200
         const val IDLE_SENTENCES = 6
