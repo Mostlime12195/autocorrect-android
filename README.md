@@ -66,9 +66,9 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
   next to a flagged word shows its fixes in the strip (offsets are tracked per field and re-found when text moves).
 - Suggestion strip: top 3. While typing it shows cheap suggestions (spatial + word frequency); after a correction it
   shows the alternatives, and tapping one replaces the corrected word.
-- Models (downloaded on first run, see below): m2 style 106M int4 (default), m2 style int8, m2 106M int4 / int8, Block
-  AttnRes 34M (battery saver). The m2 style models take a style control token (casual / standard / formal, default
-  standard) right after the leading EOS, like the web demo (`web/STYLE_TOKENS.md`); other models get untagged context.
+- Models (downloaded on first run, see below): m2 106M int4 (default; trained with a style control token: casual /
+  standard / formal, default standard, right after the leading EOS like the web demo, `web/STYLE_TOKENS.md`) and m1 34M
+  int8 (Lite / battery saver). A saved pick the manifest no longer lists is cleared and the default is used.
 - Settings app (Material 3): a setup card, a model card with size / status / download progress, battery saver, style (casual / standard / formal),
   autocorrect on/off, debug overlay, local log export / clear, opt-in data sharing.
 
@@ -128,7 +128,7 @@ Publishing a model: in the autocorrect repo, `to_ort.py` → `make_manifest.py -
 - Only the top `lmTopK` (6) cheap-ranked candidates are LM-scored, plus the typed string and any confusion /
   contraction / split candidates.
 - The shared left context's KV + conv state is cached and *extended* between words, so only the new word's tokens run.
-- **Battery saver** switches to the 34M model.
+- **Lite model** (battery saver) switches to m1 34M.
 - Debug overlay (settings) shows: model, per-word ms and scored/total candidates, skip rate, cold load (process start →
   session ready) and first-inference time. The same numbers go to the local log (`perf` / `session` events).
 

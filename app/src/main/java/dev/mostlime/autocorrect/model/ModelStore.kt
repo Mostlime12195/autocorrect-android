@@ -226,6 +226,8 @@ class ModelStore(private val ctx: Context) {
     fun activeSpec(): ModelSpec {
         val m = manifest()
         val prefs = App.instance.prefs
+        // a saved pick the manifest no longer has (m2_int4 / int8 ...) is cleared: the default takes over
+        if (prefs.model.isNotEmpty() && m.model(prefs.model) == null) prefs.model = ""
         val id = if (prefs.batterySaver) m.batterySaver else prefs.model.ifEmpty { m.default }
         return m.model(id) ?: m.model(m.default)!!
     }

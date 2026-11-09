@@ -83,7 +83,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             findPreference<ListPreference>(Prefs.MODEL)?.apply {
                 entries = m.models.map { "${it.label} (${it.downloadBytes / 1_000_000} MB)" }.toTypedArray()
                 entryValues = m.models.map { it.id }.toTypedArray()
-                if (value == null) value = m.default
+                if (value == null || m.model(value) == null) value = m.default
                 setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
             }
             findPreference<androidx.preference.SwitchPreferenceCompat>(Prefs.BATTERY_SAVER)?.apply {
@@ -91,7 +91,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 val lite = app.store.manifest().let { m -> m.model(m.batterySaver) }
                 isVisible = lite != null
                 val why = dev.mostlime.autocorrect.Device.reason(requireContext())
-                summary = "Smaller and faster (${lite?.label ?: "34M"}), a bit less accurate." +
+                summary = "Smaller and faster (m1 34M), a bit less accurate." +
                     if (why != null) " On by default because $why." else ""
                 setOnPreferenceChangeListener { _, _ -> view?.post { onModelChanged() }; true }
             }
