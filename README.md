@@ -190,3 +190,7 @@ ORT tests).
 - `app/`: the IME (`ime/`: service glue, `KeyboardController` text state machine, view, layout, field policy,
   engine holder), model download (`model/`), local log + uploader (`log/`), settings (`ui/`). The keyboard service runs
   in its own process (`:ime`), so the settings screen's test box doesn't share a main thread with it.
+
+## License
+
+Code: MIT (see `LICENSE`). Model weights in [autocorrect-models](https://github.com/Mostlime12195/autocorrect-models): CC BY 4.0. Icons: Material Symbols (Apache 2.0).
