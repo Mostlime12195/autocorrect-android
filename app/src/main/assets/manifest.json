@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "updated": "2026-11-09T00:11:01Z",
+ "updated": "2026-11-09T01:09:51Z",
  "base_url": "https://autocorrect.mostlime.hackclub.app/autocorrect-android/",
  "base_urls": [
   "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-style1/",
@@ -57,10 +57,10 @@
     "params": 106315648
    },
    "params": {
-    "lam": 1.5,
-    "bias": 0.5,
+    "lam": 1.25,
+    "bias": 0,
     "margin": 0,
-    "lam_r": 1.5,
+    "lam_r": 1.25,
     "pen": {
      "split": 2,
      "space": 3,
@@ -81,7 +81,7 @@
      "comma": 0
     }
    },
-   "params_source": "m2_100m_block4_9b_style/eval_qat1_style-none_gold-standard.json",
+   "params_source": "m2_100m_block4_9b_style/eval_qat1_style-none_gold-standard.json (params pinned to m2)",
    "supports_style": true,
    "style_tokens": {
     "casual": 249,
@@ -90,10 +90,10 @@
    },
    "style_params": {
     "casual": {
-     "lam": 1.5,
-     "bias": 0.5,
+     "lam": 1.25,
+     "bias": 0,
      "margin": 0,
-     "lam_r": 1.5,
+     "lam_r": 1.25,
      "pen": {
       "split": 2,
       "space": 3,
@@ -115,10 +115,10 @@
      }
     },
     "standard": {
-     "lam": 1.5,
-     "bias": 0.5,
+     "lam": 1.25,
+     "bias": 0,
      "margin": 0,
-     "lam_r": 1.5,
+     "lam_r": 1.25,
      "pen": {
       "split": 2,
       "space": 3,
@@ -140,10 +140,10 @@
      }
     },
     "formal": {
-     "lam": 1.5,
-     "bias": 0.5,
+     "lam": 1.25,
+     "bias": 0,
      "margin": 0,
-     "lam_r": 1.5,
+     "lam_r": 1.25,
      "pen": {
       "split": 2,
       "space": 3,
@@ -164,6 +164,11 @@
       "comma": 0
      }
     }
+   },
+   "graph_tree": {
+    "file": "m2s.step.int4t.ort",
+    "size": 79105008,
+    "sha256": "8a97ae16e68944f78e180c180dd3f18adf41b56dcadb21c4863e8e75b03c686f"
    }
   },
   {
@@ -238,7 +243,12 @@
    "params_source": "lm_block4_3b/eval_qat0.json",
    "supports_style": false,
    "style_tokens": {},
-   "style_params": {}
+   "style_params": {},
+   "graph_tree": {
+    "file": "lm_block4.step.int8t.ort",
+    "size": 42342088,
+    "sha256": "12095b069d372b4814c7ab37ad405a9b267841c4e597e7e5783f9f2f863b3e69"
+   }
   }
  ]
 }
