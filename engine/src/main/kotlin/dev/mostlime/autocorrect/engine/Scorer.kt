@@ -1,9 +1,11 @@
 package dev.mostlime.autocorrect.engine
 
+import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 
@@ -31,6 +33,8 @@ class LmState(val data: Map<String, FloatArray>, val shapes: Map<String, LongArr
 
 class StepOutput(val tokLp: FloatArray, val bnd: FloatArray, val n: Int, val state: LmState?)
 
+class TreeOutput(val edgeLp: FloatArray, val bnd: FloatArray, val state: LmState?)
+
 /** onnxruntime wrapper around one step graph (port of StepModel in web/site/models.js). */
 class StepModel(
     private val env: OrtEnvironment,
@@ -42,8 +46,15 @@ class StepModel(
         private set
 
     /** timing counters (benchmarks / debugging): runs, wall ns in run(), ns inside session.run, rows x padded length */
-    class Counters { var runs = 0L; var totalNs = 0L; var ortNs = 0L; var cells = 0L; var usedTokens = 0L }
+    class Counters { var runs = 0L; var totalNs = 0L; var ortNs = 0L; var cells = 0L; var usedTokens = 0L; var headRows = 0L }
     val counters = Counters()
+
+    /**
+     * Tree graph (android_export/tree_graph.py): one row of tokens laid out as a token tree (context delta + every
+     * candidate), attention / conv over ancestors, the vocab head only on the rows that need it. Older graphs take
+     * padded batches (run()).
+     */
+    val isTree: Boolean = session.inputNames.contains("tree_mask")
 
     fun fresh(): LmState {
         val d = HashMap<String, FloatArray>()
@@ -123,6 +134,100 @@ class StepModel(
         }
     }
 
+    /**
+     * Tree run. toks/parent: nodes in an order where parents come first, parent -1 = the last past position.
+     * Nodes 0 until trunk are a chain (the context delta); with trunk > 0 the state after the trunk is returned, with
+     * last = full log-probs at head row lastNode (which must be node trunk - 1).
+     * Returns edge log-probs log p(edgeTok[e] | path to headNodes[edgeNode[e]]) and the boundary log-prob per head row.
+     */
+    fun runTree(toks: IntArray, parent: IntArray, pos0: Int, state: LmState, headNodes: IntArray, edgeNode: IntArray,
+                edgeTok: IntArray, trunk: Int, lastNode: Int): TreeOutput {
+        check(!closed) { "session closed" }
+        val tStart = System.nanoTime()
+        val n = toks.size
+        val k = meta.convKernel
+        val depth = IntArray(n)
+        val mask = ByteBuffer.allocateDirect(n * n).order(ByteOrder.nativeOrder())
+        val cidx = LongArray(n * k)
+        for (i in 0 until n) {
+            val pi = parent[i]
+            depth[i] = if (pi < 0) 0 else depth[pi] + 1
+            var a = i
+            while (a >= 0) { mask.put(i * n + a, 1); a = parent[a] }
+            // conv window over the (past tail ++ nodes) buffer: node j at K-1+j, then ancestors, then tail K-2, K-3, ...
+            var x = k - 1 + i
+            for (q in k - 1 downTo 0) {
+                cidx[i * k + q] = x.toLong()
+                x = if (x >= k - 1) { val p = parent[x - (k - 1)]; if (p >= 0) k - 1 + p else k - 2 } else x - 1
+            }
+        }
+        val tensors = ArrayList<OnnxTensor>()
+        try {
+            val feeds = HashMap<String, OnnxTensor>()
+            fun put(name: String, t: OnnxTensor) { tensors.add(t); feeds[name] = t }
+            fun longs(name: String, v: LongArray, shape: LongArray) = put(name, OnnxTensor.createTensor(env, LongBuffer.wrap(v), shape))
+            fun ints(name: String, v: IntArray) = longs(name, LongArray(v.size) { v[it].toLong() }, longArrayOf(v.size.toLong()))
+            longs("ids", LongArray(n) { toks[it].toLong() }, longArrayOf(1, n.toLong()))
+            longs("pos", LongArray(n) { (pos0 + depth[it]).toLong() }, longArrayOf(n.toLong()))
+            put("past_mask", OnnxTensor.createTensor(env, state.mask))
+            for (nm in meta.stateNames) put("past_$nm", OnnxTensor.createTensor(env, FloatBuffer.wrap(state.data[nm]!!), state.shapes[nm]!!))
+            put("tree_mask", OnnxTensor.createTensor(env, mask, longArrayOf(n.toLong(), n.toLong()), OnnxJavaType.BOOL))
+            longs("conv_idx", cidx, longArrayOf(n.toLong(), k.toLong()))
+            ints("head_nodes", headNodes)
+            ints("edge_node", edgeNode)
+            ints("edge_tok", edgeTok)
+            longs("last_node", longArrayOf(lastNode.toLong()), longArrayOf(1))
+            val keep = trunk > 0
+            val want = LinkedHashSet<String>().apply {
+                add("edge_lp"); add("bnd")
+                if (keep) { add("last_lp"); meta.stateNames.forEach { add("present_$it") } }
+            }
+            val tOrt = System.nanoTime()
+            val result = session.run(feeds, want)
+            counters.ortNs += System.nanoTime() - tOrt
+            counters.runs++; counters.cells += n.toLong(); counters.usedTokens += n.toLong(); counters.headRows += headNodes.size.toLong()
+            result.use { res ->
+                fun floats(name: String): FloatArray {
+                    val fb = (res.get(name).get() as OnnxTensor).floatBuffer
+                    return FloatArray(fb.remaining()).also { fb.get(it) }
+                }
+                val edgeLp = floats("edge_lp")
+                val bnd = floats("bnd")
+                var st: LmState? = null
+                if (keep) {
+                    // keep the trunk: K/V slots 0 until P + trunk, conv buffer slots trunk until trunk + K - 1
+                    val d = HashMap<String, FloatArray>()
+                    val s = HashMap<String, LongArray>()
+                    val p = state.mask.size
+                    for (nm in meta.stateNames) {
+                        val t = res.get("present_$nm").get() as OnnxTensor
+                        val fb = t.floatBuffer
+                        if (nm[0] == 'k' || nm[0] == 'v') {
+                            val hd = meta.headDim
+                            val out = FloatArray(meta.nKvHeads * (p + trunk) * hd)
+                            for (h in 0 until meta.nKvHeads) {
+                                fb.position(h * (p + n) * hd)
+                                fb.get(out, h * (p + trunk) * hd, (p + trunk) * hd)
+                            }
+                            d[nm] = out; s[nm] = longArrayOf(1, meta.nKvHeads.toLong(), (p + trunk).toLong(), hd.toLong())
+                        } else {
+                            val dm = meta.dModel
+                            val out = FloatArray((k - 1) * dm)
+                            fb.position(trunk * dm)
+                            fb.get(out, 0, (k - 1) * dm)
+                            d[nm] = out; s[nm] = longArrayOf(1, (k - 1).toLong(), dm.toLong())
+                        }
+                    }
+                    st = LmState(d, s, state.mask + BooleanArray(trunk) { true }, floats("last_lp"))
+                }
+                return TreeOutput(edgeLp, bnd, st)
+            }
+        } finally {
+            tensors.forEach { it.close() }
+            counters.totalNs += System.nanoTime() - tStart
+        }
+    }
+
     override fun close() {
         closed = true
         session.close()
@@ -130,14 +235,19 @@ class StepModel(
 
     companion object {
         /**
-         * Session for a pre-optimized ORT-format graph (android_export/to_ort.py): no runtime graph optimization,
-         * initializers used straight from the (memory-mapped) model buffer.
+         * Session for a pre-optimized ORT-format graph (android_export/to_ort.py): no runtime graph optimization (all
+         * levels already applied at conversion, on arm64), initializers used straight from the (memory-mapped) model
+         * buffer. threads: DeviceCpu.intraOpThreads() on Android.
          */
         fun open(env: OrtEnvironment, model: ByteBuffer, meta: StepMeta, threads: Int = 2, ortFormat: Boolean = true,
-                 extraConfig: Map<String, String> = emptyMap()): StepModel {
+                 extraConfig: Map<String, String> = emptyMap(), spinning: Boolean = false): StepModel {
             val opts = OrtSession.SessionOptions()
             opts.setIntraOpNumThreads(threads)
             opts.setInterOpNumThreads(1)
+            // worker threads block instead of spin-waiting: the keyboard always shares the CPU with the app in front
+            // (and its own UI thread), and a spinning pool whose workers lose their core is slower, not faster
+            // (2 threads on a loaded 2-core box: 113 ms/word without spinning vs 156 ms with)
+            opts.addConfigEntry("session.intra_op.allow_spinning", if (spinning) "1" else "0")
             if (ortFormat) {
                 opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.NO_OPT)
                 opts.addConfigEntry("session.load_model_format", "ORT")
@@ -197,10 +307,9 @@ class NeuralScorer(
         return sb.toString()
     }
 
-    /** State after `toks`: exact cache hit, else extend the longest cached proper prefix, else a fresh run. */
-    private fun prefix(toks: IntArray): LmState {
-        val k = key(toks)
-        cache[k]?.let { return it.second }
+    /** Longest cached prefix of `toks` (the exact entry if cached), or null. */
+    private fun cached(toks: IntArray): Pair<IntArray, LmState>? {
+        cache[key(toks)]?.let { return it }
         var best: Pair<IntArray, LmState>? = null
         for (e in cache.values) {
             val p = e.first
@@ -210,8 +319,22 @@ class NeuralScorer(
                 if (ok) best = e
             }
         }
+        return best
+    }
+
+    private fun remember(toks: IntArray, st: LmState) {
+        cache[key(toks)] = toks to st
+        while (cache.size > cacheSize) cache.remove(cache.keys.first())
+    }
+
+    /** State after `toks`: exact cache hit, else extend the longest cached proper prefix, else a fresh run. */
+    private fun prefix(toks: IntArray): LmState {
+        val best = cached(toks)
+        if (best != null && best.first.size == toks.size) return best.second
         val out: LmState
-        if (best != null) {
+        if (step.isTree) {
+            out = tree(toks, best, emptyList()).state!!
+        } else if (best != null) {
             val delta = toks.copyOfRange(best.first.size, toks.size)
             out = step.run(listOf(delta), best.first.size, best.second, keepState = true).state!!
             tokensRun += delta.size
@@ -219,9 +342,60 @@ class NeuralScorer(
             out = step.run(listOf(toks), 0, step.fresh(), keepState = true).state!!
             tokensRun += toks.size
         }
-        cache[k] = toks to out
-        while (cache.size > cacheSize) cache.remove(cache.keys.first())
+        remember(toks, out)
         return out
+    }
+
+    /** One scoring branch for the tree path: tokens after the shared context, which of them are targets, boundary or not. */
+    private class Branch(val seq: IntArray, val tgtFrom: Int, val bnd: Boolean)
+
+    private class TreeResult(val state: LmState?, val scores: DoubleArray)
+
+    /**
+     * Tree graph: one call for the context delta (toks beyond the cached prefix `base`) and every branch.
+     * Score of a branch = sum of log p(seq[q]) for q >= tgtFrom (+ boundary after the last token).
+     */
+    private fun tree(toks: IntArray, base: Pair<IntArray, LmState>?, branches: List<Branch>): TreeResult {
+        val b0 = base?.first?.size ?: 0
+        val st0 = base?.second ?: step.fresh()
+        val trunk = toks.size - b0
+        val nodeTok = ArrayList<Int>(trunk + branches.size * 3)
+        val nodePar = ArrayList<Int>(trunk + branches.size * 3)
+        for (j in 0 until trunk) { nodeTok.add(toks[b0 + j]); nodePar.add(j - 1) }
+        val root = trunk - 1                                   // -1: candidates hang off the cached state directly
+        val child = HashMap<Long, Int>()
+        val head = LinkedHashMap<Int, Int>()                   // node -> head row
+        fun h(node: Int) = head.getOrPut(node) { head.size }
+        val edgeNode = ArrayList<Int>(); val edgeTok = ArrayList<Int>()
+        // per branch: edge indices (or -1 - tok for "from the cached last_lp") and the boundary head row (or -1)
+        val bEdges = ArrayList<IntArray>(branches.size)
+        val bBnd = IntArray(branches.size) { -1 }
+        for ((bi, br) in branches.withIndex()) {
+            var cur = root
+            val e = IntArray(br.seq.size - br.tgtFrom)
+            for ((q, t) in br.seq.withIndex()) {
+                if (q >= br.tgtFrom) {
+                    if (cur < 0) e[q - br.tgtFrom] = -1 - t
+                    else { e[q - br.tgtFrom] = edgeNode.size; edgeNode.add(h(cur)); edgeTok.add(t) }
+                }
+                val key = (cur.toLong() shl 32) or (t.toLong() and 0xffffffffL)
+                cur = child.getOrPut(key) { nodeTok.add(t); nodePar.add(cur); nodeTok.size - 1 }
+            }
+            bEdges.add(e)
+            if (br.bnd) bBnd[bi] = h(cur)
+        }
+        val lastRow = if (trunk > 0) h(trunk - 1) else 0
+        if (head.isEmpty()) h(nodeTok.size - 1)
+        val out = step.runTree(nodeTok.toIntArray(), nodePar.toIntArray(), b0, st0, head.keys.toIntArray(),
+            edgeNode.toIntArray(), edgeTok.toIntArray(), trunk, lastRow)
+        tokensRun += nodeTok.size
+        val scores = DoubleArray(branches.size) { bi ->
+            var s = 0.0
+            for (e in bEdges[bi]) s += if (e < 0) st0.last!![-1 - e].toDouble() else out.edgeLp[e].toDouble()
+            if (bBnd[bi] >= 0) s += out.bnd[bBnd[bi]].toDouble()
+            s
+        }
+        return TreeResult(out.state, scores)
     }
 
     /** Warm the cache with the context of `left` (e.g. right after a word is committed). */
@@ -253,6 +427,17 @@ class NeuralScorer(
         val ctxs = keys.map { it.ctx }
         var p = 0
         while (ctxs.all { it.size > p } && ctxs.all { it[p] == ctxs[0][p] }) p++
+        if (step.isTree) {
+            // context delta + all candidates in one call; the state after the shared context is cached
+            val shared = ctxs[0].copyOfRange(0, p)
+            val base = cached(shared)
+            val exact = base != null && base.first.size == shared.size
+            val r = tree(shared, base, keys.map { kk ->
+                Branch(kk.ctx.copyOfRange(p, kk.ctx.size) + kk.tgt, kk.ctx.size - p, !kk.eot)
+            })
+            if (!exact) remember(shared, r.state!!)
+            return r.scores
+        }
         val pre: LmState = if (p > 0) prefix(ctxs[0].copyOfRange(0, p)) else step.fresh()
         val rems = keys.map { it.ctx.copyOfRange(p, it.ctx.size) + it.tgt }
         val o = step.run(rems, p, pre, keepState = false)
