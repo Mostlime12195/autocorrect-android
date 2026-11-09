@@ -216,7 +216,7 @@ class KeyboardController(
     private val held = ArrayList<() -> Unit>()
     private var holdToken: Any? = null
 
-    enum class StripMode { NONE, TYPING, LAST_WORD, REWIND, TYPO, DICT_ADDED }
+    enum class StripMode { NONE, TYPING, LAST_WORD, REWIND, TYPO, DICT_ADDED, RECENT }
 
     /** the most recent word marked as a likely typo (start = its position in the counter) */
     private class Typo(val start: Long, val typed: String, val fixes: List<String>, val spelling: Boolean,
@@ -232,6 +232,8 @@ class KeyboardController(
     private val flags = ArrayList<Flag>()
     /** the flag the cursor is on (its fixes are in the strip) */
     private var cursorFlag: Flag? = null
+    /** RECENT strip: "teh → the" chips for the latest flagged words behind the cursor, best-guess fix on tap */
+    private var recentFlags: List<Flag> = emptyList()
 
     private fun addFlag(f: Flag) {
         flags.removeAll { it.start < f.start + f.word.length && f.start < it.start + it.word.length }
@@ -585,6 +587,7 @@ class KeyboardController(
                     }
                 }
             }
+            if (stripMode == StripMode.NONE || stripMode == StripMode.RECENT) showRecent()
             if (todo.size > batch.size) idleTouch()   // more sentences: next round
         }
     }
@@ -870,6 +873,16 @@ class KeyboardController(
                 }
                 setStrip(emptyList(), -1, StripMode.NONE)
             }
+            StripMode.RECENT -> {
+                val f = recentFlags.getOrNull(i) ?: return
+                val to = f.fixes.first()
+                typo?.let { t -> if (t.typed == f.word) typo = null }
+                if (replaceFlag(ed, f, to)) {
+                    f.event?.let { val e = LinkedHashMap(it); e["outcome"] = "strip_pick"; e["final"] = to; e["ts"] = System.currentTimeMillis(); write(e) }
+                }
+                setStrip(emptyList(), -1, StripMode.NONE)
+                showRecent()
+            }
             StripMode.DICT_ADDED, StripMode.NONE -> {}
         }
     }
@@ -899,6 +912,7 @@ class KeyboardController(
         val w = shown.getOrNull(i) ?: return
         when (stripMode) {
             StripMode.TYPO -> notTypo(ed)
+            StripMode.RECENT -> { cursorFlag = recentFlags.getOrNull(i) ?: return; notTypo(ed); showRecent() }
             StripMode.TYPING -> if (w == composing.toString() && learning.addWord(w)) ui.onDictAdded(w)
             StripMode.LAST_WORD -> {
                 val l = last ?: return
@@ -1025,12 +1039,33 @@ class KeyboardController(
         return true
     }
 
-    /** strip for the most recent flagged word, while it's still close to the cursor */
+    /**
+     * Strip for flagged words: right after the flagged word, its fixes; once the user has typed on, chips like
+     * "teh → the" for the latest flagged words behind the cursor (a tap fixes that word in place). Works in every app,
+     * also those that drop SuggestionSpans.
+     */
     private fun showTypo() {
-        val t = typo ?: return
         if (composing.isNotEmpty()) return
-        if (pos - (t.start + t.typed.length) > MAX_AFTER) { typo = null; return }
-        setStrip(t.fixes, 0, StripMode.TYPO, hint = "typo?", action = if (t.spelling) "not a typo" else "ignore")
+        val t = typo
+        if (t != null && pos - (t.start + t.typed.length) <= 2) {
+            setStrip(t.fixes, 0, StripMode.TYPO, hint = "typo?", action = if (t.spelling) "not a typo" else "ignore")
+            return
+        }
+        if (t != null && pos - (t.start + t.typed.length) > MAX_AFTER) typo = null
+        showRecent()
+    }
+
+    private fun showRecent() {
+        if (composing.isNotEmpty() || flags.isEmpty()) return
+        val ed = ed() ?: return
+        val cur = ed.cursorPos()
+        if (cur < 0) return
+        // only flags whose word is still there (edited words drop out)
+        val recent = flags.filter { it.start <= cur && cur - it.start <= IDLE_CHARS }.sortedByDescending { it.start }
+            .filter { locate(ed, it, cur) }.take(3)
+        if (recent.isEmpty()) return
+        recentFlags = recent
+        setStrip(recent.map { "${it.word} → ${it.fixes.first()}" }, 0, StripMode.RECENT, hint = if (recent.size == 1) "typo?" else "typos?")
     }
 
     /**

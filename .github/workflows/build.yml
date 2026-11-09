@@ -111,6 +111,11 @@ jobs:
         with:
           pattern: autocorrect-*
           merge-multiple: true
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -124,7 +129,12 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: .github/scripts/smoke.sh "$(ls autocorrect-*.apk | head -1)"
+          # instrumented tests (real EditText / ImageDecoder) first; they uninstall their debug build afterwards
+          script: |
+            ./gradlew --stacktrace :app:connectedDebugAndroidTest || echo "INSTRUMENTED TESTS FAILED" | tee smoke-instrumented-failed.txt
+            mkdir -p smoke && cp -r app/build/reports/androidTests smoke/ 2>/dev/null || true
+            .github/scripts/smoke.sh "$(ls autocorrect-*.apk | head -1)"
+            [ ! -f smoke-instrumented-failed.txt ]
       - uses: actions/upload-artifact@v7
         if: always()
         with:

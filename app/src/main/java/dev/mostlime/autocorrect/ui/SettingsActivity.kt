@@ -193,29 +193,16 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
 
         // ------------------------------------------------------------------ appearance
         private val pickImage = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
-            if (uri != null) lifecycleScope.launch {
-                val ok = withContext(Dispatchers.IO) { runCatching { saveBackground(uri) }.getOrDefault(false) }
-                if (ok) app.prefs.bgStamp = System.currentTimeMillis()
-                Toast.makeText(requireContext(), if (ok) "Background set" else "Couldn't read that image", Toast.LENGTH_SHORT).show()
+            if (uri == null) return@registerForActivityResult
+            // read now, in this activity: the picker's URI grant is ours only while we hold it
+            val ctx = requireContext().applicationContext
+            val width = resources.displayMetrics.widthPixels.coerceAtMost(1440)
+            lifecycleScope.launch {
+                val err = withContext(Dispatchers.IO) { BackgroundImage.save(ctx, uri, Prefs.bgFile(ctx), width) }
+                if (err == null) app.prefs.bgStamp = System.currentTimeMillis()
+                Toast.makeText(ctx, if (err == null) "Background set" else "Couldn't open that image ($err)", Toast.LENGTH_LONG).show()
                 refreshAppearance()
             }
-        }
-
-        /** a copy at screen width (the keyboard crops it to its own size); one JPEG in app storage */
-        private fun saveBackground(uri: android.net.Uri): Boolean {
-            val cr = requireContext().contentResolver
-            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) } ?: return false
-            if (o.outWidth <= 0) return false
-            val target = resources.displayMetrics.widthPixels.coerceAtMost(1440)
-            var sample = 1
-            while (o.outWidth / (sample * 2) >= target) sample *= 2
-            val src = cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) } ?: return false
-            val h = (src.height * target / src.width.toFloat()).toInt().coerceAtLeast(1)
-            val scaled = if (src.width > target) android.graphics.Bitmap.createScaledBitmap(src, target, h, true).also { src.recycle() } else src
-            Prefs.bgFile(requireContext()).outputStream().use { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
-            scaled.recycle()
-            return true
         }
 
         private fun setupAppearance() {

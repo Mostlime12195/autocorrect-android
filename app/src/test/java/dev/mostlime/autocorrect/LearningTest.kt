@@ -116,8 +116,9 @@ class LearningTest {
         assertEquals("so i want teh quick brown fox ", ed.text.toString())   // not even i -> I
         val at = "so i want ".length
         assertEquals("the", ed.marks[at]?.first())
-        assertEquals(StripMode.TYPO, ctl.stripMode)
-        assertEquals("the", ctl.shown[0])
+        // the user is past the word: a chip "teh → the" fixes it in place
+        assertEquals(StripMode.RECENT, ctl.stripMode)
+        assertEquals("teh → the", ctl.shown[0])
         assertEquals(0, engine.rewinds)
         assertTrue(events.any { it["outcome"] == "flagged" && it["typed"] == "teh" })
         // tapping a fix is an explicit edit: allowed
@@ -137,7 +138,7 @@ class LearningTest {
         type("ck ")
         engine.deliver()
         assertEquals("teh quick ", ed.text.toString())
-        assertEquals(StripMode.TYPO, ctl.stripMode)        // the flagged word comes back once nothing is composing
+        assertEquals(StripMode.RECENT, ctl.stripMode)      // the flagged word comes back once nothing is composing
     }
 
     @Test fun notATypoClearsMarkAddsWordAndLogs() {
@@ -145,7 +146,7 @@ class LearningTest {
         type("fized a lot ")
         engine.deliver()
         assertTrue(ed.marks.containsKey(0))
-        ctl.stripAction()                                  // "not a typo"
+        ctl.longPressSuggestion(0)                         // long-press the "fized → fixed" chip: not a typo
         assertTrue(user.has("fized"))
         assertTrue(ed.marks.isEmpty())
         assertEquals("fized a lot ", ed.text.toString())
@@ -164,7 +165,7 @@ class LearningTest {
         type("i went their ")
         engine.deliver()
         assertTrue(ed.marks.isNotEmpty())                  // their -> there flagged
-        ctl.stripAction()                                  // "ignore" for an in-vocab confusable
+        ctl.longPressSuggestion(0)                         // "ignore" for an in-vocab confusable
         assertFalse(user.has("their"))
         assertTrue(user.penalty("their", "there") > 0)
         assertTrue(events.any { it["type"] == "suppress" && it["source"] == "ignore" })
@@ -316,7 +317,7 @@ class LearningTest {
         start(suggestOnly = true)
         type("so teh quick brown fox is great ")
         engine.deliver()
-        assertEquals(StripMode.TYPO, ctl.stripMode)
+        assertEquals(StripMode.RECENT, ctl.stripMode)
         ctl.pickSuggestion(-1)                              // nothing
         // the user moves on; the strip shows something else
         type("a")
@@ -329,6 +330,17 @@ class LearningTest {
         assertEquals("the", ctl.shown[0])
         ctl.pickSuggestion(0)
         assertEquals("so the quick brown fox is great ", ed.text.toString())
+    }
+
+    /** right after the flagged word the strip has its fixes and the "not a typo" chip */
+    @Test fun rightAfterTheWordTheStripOffersItsFixes() {
+        start(suggestOnly = true)
+        type("so teh ")
+        engine.deliver()
+        assertEquals(StripMode.TYPO, ctl.stripMode)
+        assertEquals("the", ctl.shown[0])
+        ctl.pickSuggestion(0)
+        assertEquals("so the ", ed.text.toString())
     }
 
     @Test fun spellingClassification() {

@@ -15,6 +15,7 @@ android {
         versionCode = runNumber
         versionName = "0.1.$runNumber"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // CI writes the release keystore from secrets (see README "Signing"); local builds fall back to the debug key
@@ -64,4 +65,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.11.0")
     testImplementation("junit:junit:4.13.2")
+    // instrumented tests on the CI emulator (real EditText / ImageDecoder)
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

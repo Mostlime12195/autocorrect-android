@@ -43,97 +43,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     private var info: EditorInfo? = null
     private val jobs = ArrayList<Job>()
 
-    private val editor = object : Editor {
-        private val ic get() = currentInputConnection
-        override fun textBefore(n: Int) = ic?.getTextBeforeCursor(n, 0)?.toString() ?: ""
-        override fun textAfter(n: Int) = ic?.getTextAfterCursor(n, 0)?.toString() ?: ""
-        override fun cursorPos(): Int {
-            val et = ic?.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return -1
-            return if (et.selectionStart < 0) -1 else et.startOffset + et.selectionStart
-        }
-        override fun replaceRange(offset: Int, len: Int, text: String) {
-            val c = ic ?: return
-            val cur = cursorPos().takeIf { it >= 0 } ?: return
-            val a = cur + offset; val b = a + len
-            if (a < 0) return
-            val newCur = when { b <= cur -> cur + text.length - len; a >= cur -> cur; else -> a + text.length }
-            c.beginBatchEdit()
-            try { if (c.setComposingRegion(a, b)) { c.commitText(text, 1); c.setSelection(newCur, newCur) } } finally { c.endBatchEdit() }
-        }
-        override fun moveCursor(dir: String) {
-            sendDownUpKeyEvents(when (dir) { "L" -> KeyEvent.KEYCODE_DPAD_LEFT; "R" -> KeyEvent.KEYCODE_DPAD_RIGHT; "U" -> KeyEvent.KEYCODE_DPAD_UP; else -> KeyEvent.KEYCODE_DPAD_DOWN })
-        }
-        /** same text, fresh SuggestionSpans: replace [cursor + offset, + len) and put the cursor back */
-        override fun remark(offset: Int, text: String, marks: List<TypoMark>) {
-            val c = ic ?: return
-            val et = c.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0) ?: return
-            if (et.selectionStart != et.selectionEnd || et.selectionStart < 0) return
-            val cur = et.startOffset + et.selectionStart
-            val a = cur + offset
-            if (a < 0) return
-            val ss = android.text.SpannableString(text)
-            for (m in marks) {
-                if (m.start < 0 || m.start + m.len > text.length) continue
-                ss.setSpan(android.text.style.SuggestionSpan(this@AutocorrectIME, m.suggestions.take(5).toTypedArray(),
-                    android.text.style.SuggestionSpan.FLAG_MISSPELLED or android.text.style.SuggestionSpan.FLAG_EASY_CORRECT),
-                    m.start, m.start + m.len, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-            c.beginBatchEdit()
-            try {
-                if (c.setComposingRegion(a, a + text.length)) { c.commitText(ss, 1); c.setSelection(cur, cur) }
-            } finally { c.endBatchEdit() }
-        }
-        override fun hasSelection() = !ic?.getSelectedText(0).isNullOrEmpty()
-        override fun setComposing(text: String) { ic?.setComposingText(text, 1) }
-        override fun finishComposing() { ic?.finishComposingText() }
-        override fun commit(text: String) { ic?.commitText(text, 1) }
-        override fun deleteBefore(n: Int) { ic?.deleteSurroundingText(n, 0) }
-        /** one replace (composing region over the span + commit) instead of a visible delete then insert */
-        override fun replaceBefore(n: Int, text: String) {
-            val c = ic ?: return
-            val et = c.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)
-            if (et != null && et.selectionStart == et.selectionEnd && et.selectionStart >= 0) {
-                val end = et.startOffset + et.selectionStart
-                if (end - n >= 0 && c.setComposingRegion(end - n, end)) { c.commitText(text, 1); return }
-            }
-            c.deleteSurroundingText(n, 0); c.commitText(text, 1)
-        }
-        /** a likely typo: SuggestionSpan (misspelled + easy-correct) so apps that support it underline it with a fix menu */
-        override fun replaceBefore(n: Int, text: String, mark: TypoMark?) {
-            if (mark == null) { replaceBefore(n, text); return }
-            val ss = android.text.SpannableString(text)
-            val span = android.text.style.SuggestionSpan(this@AutocorrectIME, mark.suggestions.take(5).toTypedArray(),
-                android.text.style.SuggestionSpan.FLAG_MISSPELLED or android.text.style.SuggestionSpan.FLAG_EASY_CORRECT)
-            ss.setSpan(span, mark.start, mark.start + mark.len, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            val c = ic ?: return
-            val et = c.getExtractedText(android.view.inputmethod.ExtractedTextRequest(), 0)
-            if (et != null && et.selectionStart == et.selectionEnd && et.selectionStart >= 0) {
-                val end = et.startOffset + et.selectionStart
-                if (end - n >= 0 && c.setComposingRegion(end - n, end)) { c.commitText(ss, 1); return }
-            }
-            c.deleteSurroundingText(n, 0); c.commitText(ss, 1)
-        }
-        override fun beginBatch() { ic?.beginBatchEdit() }
-        override fun endBatch() { ic?.endBatchEdit() }
-        override fun deleteKey(): Int {
-            val c = ic ?: return -1
-            if (!c.getSelectedText(0).isNullOrEmpty()) { c.commitText("", 1); return -1 }
-            val b = c.getTextBeforeCursor(32, 0)?.toString() ?: ""
-            if (b.isEmpty()) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); return -1 }
-            // one user-perceived character (an emoji with modifiers / ZWJ sequence counts as one)
-            val it = android.icu.text.BreakIterator.getCharacterInstance()
-            it.setText(b)
-            val start = it.preceding(b.length).coerceAtLeast(0)
-            val n = (b.length - start).coerceAtLeast(1)
-            c.deleteSurroundingText(n, 0)
-            return n
-        }
-        override fun enter() { sendKeyChar('\n') }
-        override fun capsMode(): Boolean {
-            val ei = info ?: return false
-            return (ic?.getCursorCapsMode(ei.inputType) ?: 0) != 0
-        }
-    }
+    /** the field (InputConnection) as the controller sees it; the cursor falls back to onUpdateSelection's */
+    private val editor = IcEditor(this, { currentInputConnection }, { info }, { sendDownUpKeyEvents(it) }, { sendKeyChar(it) }) { lastSelStart }
+    @Volatile private var lastSelStart = -1
 
     private val engine = object : CorrectionEngine {
         override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) {
@@ -348,6 +260,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         super.onStartInputView(editorInfo, restarting)
         app.prefs.reload()   // settings live in the app process
         info = editorInfo
+        lastSelStart = editorInfo?.initialSelStart?.takeIf { it >= 0 && it == editorInfo.initialSelEnd } ?: -1
         val policy = FieldPolicy.of(editorInfo)
         val o = app.prefs.layoutOptions()
         if (o != layoutOpts) {
@@ -404,6 +317,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        lastSelStart = if (newSelStart == newSelEnd) newSelStart else -1
         ctl.selectionChanged()
         ctl.cursorMoved(newSelStart, newSelEnd)
     }
