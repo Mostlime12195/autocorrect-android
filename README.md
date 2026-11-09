@@ -1,4 +1,4 @@
-# Autocorrect keyboard (Android)
+# Keylime keyboard (Android)
 
 A QWERTY keyboard (Android `InputMethodService`) whose autocorrect is the tiny on-device language model from the
 `autocorrect` project. It is a Kotlin port of the browser demo's pipeline (candidate generation → LM re-ranking →
@@ -84,9 +84,9 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
 
 In the Autocorrect app:
 
-1. **Enable the keyboard** → turn on "Autocorrect keyboard" (Android warns that keyboards can see what you type; this
+1. **Enable the keyboard** → turn on "Keylime" (Android warns that keyboards can see what you type; this
    one keeps its log on the phone unless you turn on sharing).
-2. **Switch to it** → pick "Autocorrect keyboard". You can also long-press ?123 (or use the keyboard icon in
+2. **Switch to it** → pick "Keylime". You can also long-press ?123 (or use the keyboard icon in
    the navigation bar) to switch.
 3. Type in the "Try the keyboard here" box at the top.
 

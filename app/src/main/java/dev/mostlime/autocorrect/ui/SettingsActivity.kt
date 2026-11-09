@@ -344,7 +344,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             val ctx = requireContext()
             if (!Updater.canInstall(ctx)) {
                 MaterialAlertDialogBuilder(ctx).setTitle("Allow updates from this app")
-                    .setMessage("Android needs your OK once: turn on \"Allow from this source\" for Autocorrect, then come back and tap the update again.")
+                    .setMessage("Android needs your OK once: turn on \"Allow from this source\" for Keylime, then come back and tap the update again.")
                     .setPositiveButton("Open settings") { _, _ -> startActivity(Updater.allowInstallsIntent(ctx)) }
                     .setNegativeButton("Cancel", null).show()
                 return
@@ -376,10 +376,10 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             val running = w?.state == WorkInfo.State.RUNNING || w?.state == WorkInfo.State.ENQUEUED
             findPreference<SetupCard>("setup_card")?.isVisible = !(enabled && current && installed)
             findPreference<SetupCard>("setup_card")?.steps = listOf(
-                SetupCard.Step("Enable the keyboard", if (enabled) "Enabled" else "Turn on \"Autocorrect keyboard\" in system settings", enabled, "Enable") {
+                SetupCard.Step("Enable the keyboard", if (enabled) "Enabled" else "Turn on \"Keylime\" in system settings", enabled, "Enable") {
                     startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
                 },
-                SetupCard.Step("Switch to it", if (current) "In use" else "Pick \"Autocorrect keyboard\" as your keyboard", current, "Switch") {
+                SetupCard.Step("Switch to it", if (current) "In use" else "Pick \"Keylime\" as your keyboard", current, "Switch") {
                     imm.showInputMethodPicker()
                 },
                 SetupCard.Step("Download the model", if (installed) "${spec.label} is ready" else if (running) "Downloading…" else "${mb(spec.downloadBytes)}, Wi-Fi recommended",

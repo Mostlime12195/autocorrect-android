@@ -168,7 +168,7 @@ object Updater {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ms_download)
-            .setContentTitle("Autocorrect ${u.version} is available")
+            .setContentTitle("Keylime ${u.version} is available")
             .setContentText(if (ready) "Downloaded. Tap to install." else "Tap to update.")
             .setStyle(NotificationCompat.BigTextStyle().bigText(u.notes.ifBlank { if (ready) "Downloaded. Tap to install." else "Tap to update." }))
             .setContentIntent(open).setAutoCancel(true).build()
