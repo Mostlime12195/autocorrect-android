@@ -265,10 +265,7 @@ class KeyboardController(
     private var suggestSeq = 0
 
     // swipe typing
-    /** the letter the last key press appended (a swipe that starts on that key takes it back) */
-    private class LetterPress(val shiftBefore: Shift, val len: Int)
-    private var lastPress: LetterPress? = null
-    /** shift state when the current gesture's first key went down */
+    /** shift state when the current swipe started */
     private var swipeShift: Shift? = null
     /** id of the swipe being decoded (0 = none); a result for another id is dropped */
     private var swipePending = 0
@@ -287,7 +284,7 @@ class KeyboardController(
         typo = null; dictAdded = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
         chipFlag = null; spansDropped = false; marked.clear()
         idleToken?.let { timer.cancel(it) }; idleToken = null
-        lastPress = null; swipeShift = null; swipePending = 0; swipeSpace = false
+        swipeShift = null; swipePending = 0; swipeSpace = false
         releaseHold()
         shift = Shift.OFF
         autoShift()
@@ -315,21 +312,21 @@ class KeyboardController(
     }
 
     // ------------------------------------------------------------------ keys
-    fun key(k: KeyDef, touch: Touch) {
+    /** A key press. [base]: the key whose long-press popup [k] came from (it composes like that key would). */
+    fun key(k: KeyDef, touch: Touch, base: KeyDef? = null) {
         idleTouch()
-        if (holding) { held.add { key(k, touch) }; return }
+        if (holding) { held.add { key(k, touch, base) }; return }
         val ed = ed() ?: return
-        lastPress = null
         val afterSwipe = swipeSpace
         swipeSpace = false
         when (k.type) {
             KeyType.CHAR -> {
                 var c = k.text
-                val shiftBefore = shift
                 if (shift != Shift.OFF) c = c.uppercase()
                 val ch = c[0]
-                val letter = ch in 'a'..'z' || ch in 'A'..'Z' || (Character.isLetter(ch) && composing.isNotEmpty())
-                if (letter || (ch == '\'' && composing.isNotEmpty())) {
+                fun composes(x: Char) = x in 'a'..'z' || x in 'A'..'Z' || ((Character.isLetter(x) || x == '\'') && composing.isNotEmpty())
+                // a popup choice from a letter key goes into the word like that letter would (é, or q's 1)
+                if (composes(ch) || (base != null && base.text.isNotEmpty() && composes(base.text[0]))) {
                     flushLast()
                     if (stripMode != StripMode.NONE && stripMode != StripMode.TYPING) setStrip(emptyList(), -1, StripMode.NONE)
                     composing.append(c); touches.add(touch)
@@ -337,7 +334,6 @@ class KeyboardController(
                     // ALL-CAPS fields (CAP_CHARACTERS) keep the shift on after each letter
                     if (shift == Shift.ON && !(config.autoCap && config.policy.capChars)) shift = Shift.OFF
                     scheduleSuggest()
-                    lastPress = LetterPress(shiftBefore, composing.length)
                 } else if (composing.isNotEmpty()) {
                     finishWord(ed, c, trigger = ch in WORD_END_PUNCT)
                 } else if (afterSwipe && ch in SWIPE_PUNCT && ed.textBefore(1) == " " && !ed.hasSelection()) {
@@ -853,7 +849,6 @@ class KeyboardController(
     fun pickSuggestion(i: Int) {
         if (holding) { held.add { pickSuggestion(i) }; return }
         val ed = ed() ?: return
-        lastPress = null
         val pick = shown.getOrNull(i) ?: return
         when (stripMode) {
             StripMode.TYPING -> {
@@ -1176,7 +1171,7 @@ class KeyboardController(
     fun insertText(t: String) {
         if (holding) { held.add { insertText(t) }; return }
         val ed = ed() ?: return
-        lastPress = null; swipeSpace = false
+        swipeSpace = false
         flushLast()
         cancelSuggest()
         if (composing.isNotEmpty()) { ed.commit(composing.toString()); resetWord() }
@@ -1186,43 +1181,24 @@ class KeyboardController(
         autoShift()
     }
 
-    /** Long-press alternate: replaces the character the press already typed (é for e, 1 for q, ? for .). */
-    fun replaceLastChar(alt0: String) {
-        if (holding) { held.add { replaceLastChar(alt0) }; return }
-        val ed = ed() ?: return
-        if (composing.isNotEmpty()) {
-            val alt = if (composing.last().isUpperCase()) alt0.uppercase() else alt0
-            composing.setLength(composing.length - 1); composing.append(alt)
-            ed.setComposing(composing.toString())
-            scheduleSuggest()
-            return
-        }
-        // the character ended a word: swap the separator of that word's pending correction too
-        val pd = pendings.lastOrNull()
-        if (pd != null && pd.uncommitted && pd.sepText.length == 1) { pd.sepText = alt0; return }
-        if (ed.textBefore(1).isEmpty()) return
-        ed.beginBatch(); ed.deleteBefore(1); ed.commit(alt0); ed.endBatch()
-        if (pd != null && pd.valid && pd.anchor == pos && pd.sepText.length == 1) pd.sepText = alt0
-        autoShift()
+    /**
+     * Long-press popup choice (é for e, 1 for q, ? for .), typed in place of the pressed key, which never went in:
+     * one character is typed like that key would be, a longer entry goes in as text.
+     */
+    fun alternate(base: KeyDef, alt: String, touch: Touch) {
+        if (alt.isEmpty()) return
+        if (alt.codePointCount(0, alt.length) > 1) { insertText(alt); return }
+        key(KeyDef(alt, alt, KeyType.CHAR, base.x, base.w, base.row), touch, base)
     }
 
     // ------------------------------------------------------------------ swipe typing
     /**
-     * The view decided the current touch is a swipe: take back the letter its first key press typed (keys fire on
-     * press so taps stay instant) and remember the shift state from before that press.
+     * The view decided the current touch is a swipe. Its first key never typed (character keys wait for the gesture to
+     * be decided), so there is nothing to take back: remember the shift state for the swiped word's case.
      */
     fun swipeBegin() {
         if (holding) { held.add { swipeBegin() }; return }
-        val lp = lastPress
-        lastPress = null
-        swipeShift = lp?.shiftBefore ?: shift
-        val ed = ed() ?: return
-        if (lp == null || composing.length != lp.len) return
-        cancelSuggest()
-        composing.setLength(composing.length - 1)
-        if (touches.isNotEmpty()) touches.removeAt(touches.size - 1)
-        if (composing.isEmpty()) { ed.commit(""); setStrip(emptyList(), -1, StripMode.NONE) } else ed.setComposing(composing.toString())
-        shift = lp.shiftBefore
+        swipeShift = shift
     }
 
     /**
@@ -1234,7 +1210,7 @@ class KeyboardController(
         idleTouch()
         if (holding) { held.add { swipe(path) }; return }
         val ed = ed() ?: return
-        lastPress = null; swipeSpace = false
+        swipeSpace = false
         flushLast()
         cancelSuggest()
         if (composing.isNotEmpty()) {

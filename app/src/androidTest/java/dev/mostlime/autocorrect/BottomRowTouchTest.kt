@@ -27,7 +27,7 @@ class BottomRowTouchTest {
     private class Rec : KeyboardView.Listener {
         val keys = ArrayList<KeyType>()
         override fun onKey(key: KeyDef, touch: Touch) { keys.add(key.type) }
-        override fun onAlternate(text: String) {}
+        override fun onAlternate(key: KeyDef, text: String, touch: Touch) {}
         override fun onSuggestion(index: Int) {}
         override fun onSwitchIme() {}
         override fun onSettings() {}

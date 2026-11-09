@@ -89,8 +89,10 @@ class Palette(ctx: Context) {
 @SuppressLint("ViewConstructor")
 class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     interface Listener {
+        /** a key press: character keys only once the gesture is a tap (release, or the next key down) */
         fun onKey(key: KeyDef, touch: Touch)
-        fun onAlternate(text: String)
+        /** a long-press popup choice for [key] (the key itself never typed) */
+        fun onAlternate(key: KeyDef, text: String, touch: Touch)
         fun onSuggestion(index: Int)
         fun onSuggestionLongPress(index: Int) {}
         /** the strip's action chip ("not a typo", "ignore", "undo") */
@@ -101,11 +103,11 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         fun onClipboard() {}
         fun onEmoji() {}
         fun onPasteChip() {}
-        /** long-press on comma: emoji (the comma the press typed is taken back) */
+        /** long-press on comma: emoji (the comma never typed) */
         fun onCommaLongPress() {}
         /** one-handed mode: the empty side was tapped */
         fun onOneHandedSwap() {}
-        /** the touch that started on a letter became a swipe (the letter its press typed must be taken back) */
+        /** the touch that started on a letter became a swipe (its letter never typed) */
         fun onSwipeStart() {}
         /** the swipe ended: path in model units (key widths, rows x ROW_H), letter area only */
         fun onSwipe(path: List<Touch>) {}
@@ -268,12 +270,20 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         if (si < suggestions.size) { stripLongDone = true; buzz(strong = true); listener.onSuggestionLongPress(si) }
     }
 
+    /** the character key press whose gesture (tap / swipe / long press) isn't decided yet: nothing typed so far */
+    private val pending = PendingPress { k, t -> listener.onKey(k, t) }
+
     // long-press alternates
-    private class Alts(val key: KeyDef, val pointer: Int, val options: List<String>, var sel: Int)
+    private class Alts(val key: KeyDef, val pointer: Int, val options: List<String>, var sel: Int, val touch: Touch)
     private var alts: Alts? = null
     private val longPress = Runnable { openAlternates() }
-    private val commaLongPress = Runnable { buzz(strong = true); commaDone = true; listener.onCommaLongPress() }
-    private var commaDone = false
+    private val commaLongPress = Runnable {
+        // the comma press is now a long press: it never types
+        if (!pending.drop(commaPointer)) return@Runnable
+        commaPointer = -1
+        buzz(strong = true); listener.onCommaLongPress()
+    }
+    private var commaPointer = -1
     private var longPressPointer = -1
 
     // swipe typing: a drag that starts on a letter and has been over 2+ letter keys (and moved far enough) is a swipe
@@ -674,7 +684,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         t.started = true
         // the press is no longer a key press: no preview bubble, no long-press popup
         pressed.remove(t.pointer)?.let { released[it] = SystemClock.uptimeMillis() }
+        pending.drop(t.pointer)   // its first key never types
         ui.removeCallbacks(longPress); longPressPointer = -1
+        ui.removeCallbacks(commaLongPress); commaPointer = -1
         listener.onSwipeStart()
         // trail from the start of the gesture
         trailBreak = trailN
@@ -736,7 +748,12 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         val k = pressed[longPressPointer] ?: return
         val opts = KeyboardLayout.alternates(k)
         if (opts.isEmpty()) return
-        alts = Alts(k, longPressPointer, opts, 0)
+        // only a press that hasn't typed or turned into something else (comma's emoji long press) opens a popup
+        if (pending.pointer != longPressPointer) return
+        val touch = pending.touch ?: Touch.APOS
+        pending.drop(longPressPointer)   // the press is a long press now: its key never types
+        if (commaPointer == longPressPointer) { ui.removeCallbacks(commaLongPress); commaPointer = -1 }
+        alts = Alts(k, longPressPointer, opts, 0, touch)
         buzz(strong = true)
         invalidate()
     }
@@ -753,6 +770,13 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (deadBottom > 0 && y >= height - deadBottom) return true
                 if (track?.started == true) return true   // other fingers are ignored during a swipe
                 track = null                              // a second finger: fast typing, not a swipe
+                // a press still waiting is a tap: it types now, before this one (overlapping presses keep their order)
+                val waiting = pending.pointer
+                if (waiting >= 0) {
+                    if (longPressPointer == waiting) { ui.removeCallbacks(longPress); longPressPointer = -1 }
+                    if (commaPointer == waiting) { ui.removeCallbacks(commaLongPress); commaPointer = -1 }
+                    pending.flush()
+                }
                 if (y < stripH) {
                     if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                         stripDown = x; stripLongDone = false
@@ -774,14 +798,20 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 }
                 pressed[id] = k
                 buzz()
-                // text keys fire on press (keeps order when presses overlap); ?123 fires on release so a long press
-                // can open the keyboard switcher instead
-                // space fires on release inside the key, so a touch that turns into a system swipe never types
-                if (k.type == KeyType.TO_SYMBOLS) symDownAt = e.eventTime
-                else if (k.type != KeyType.SPACE) listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
+                // character keys wait until the gesture is decided: a tap types on release (or when the next key goes
+                // down, which keeps the order of overlapping presses); a swipe or long press never types the key.
+                // ?123 fires on release so a long press can open the keyboard switcher instead.
+                // space fires on release inside the key, so a touch that turns into a system swipe never types.
+                // other keys (backspace, shift, enter, layer keys) fire on press.
+                when (k.type) {
+                    KeyType.TO_SYMBOLS -> symDownAt = e.eventTime
+                    KeyType.SPACE -> {}
+                    KeyType.CHAR -> pending.down(id, k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
+                    else -> listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
+                }
                 if (k.type == KeyType.BACKSPACE) { repeatKey = k; repeats = 0; ui.postDelayed(repeater, REPEAT_START_MS) }
                 if (k.type == KeyType.CHAR && k.text == "," && layer.isLetters) {
-                    commaDone = false; ui.removeCallbacks(commaLongPress); ui.postDelayed(commaLongPress, longPressMs)
+                    commaPointer = id; ui.removeCallbacks(commaLongPress); ui.postDelayed(commaLongPress, longPressMs)
                 }
                 if (k.type == KeyType.CHAR && KeyboardLayout.alternates(k).isNotEmpty()) {
                     ui.removeCallbacks(longPress); longPressPointer = id; ui.postDelayed(longPress, longPressMs)
@@ -820,8 +850,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                             listener.onSwipe(tr.pts)
                         }
                         if (e.actionMasked != MotionEvent.ACTION_POINTER_UP) {
-                            pressed.clear(); stripDown = -1f; repeatKey = null
+                            pressed.clear(); stripDown = -1f; repeatKey = null; pending.clear()
                             ui.removeCallbacks(repeater); ui.removeCallbacks(longPress); ui.removeCallbacks(commaLongPress); alts = null
+                            longPressPointer = -1; commaPointer = -1
                         }
                         invalidate()
                         return true
@@ -830,10 +861,12 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val k = pressed.remove(id)
                 if (k != null) released[k] = SystemClock.uptimeMillis()
                 if (id == longPressPointer) { ui.removeCallbacks(longPress); longPressPointer = -1 }
-                if (k?.text == ",") ui.removeCallbacks(commaLongPress)
+                if (id == commaPointer) { ui.removeCallbacks(commaLongPress); commaPointer = -1 }
+                // a character press still waiting is a tap: it types now (a cancelled touch never types)
+                if (e.actionMasked == MotionEvent.ACTION_CANCEL) pending.drop(id) else pending.up(id)
                 val a = alts
                 if (a != null && a.pointer == id) {
-                    if (e.actionMasked != MotionEvent.ACTION_CANCEL) listener.onAlternate(a.options[a.sel])
+                    if (e.actionMasked != MotionEvent.ACTION_CANCEL) listener.onAlternate(a.key, a.options[a.sel], a.touch)
                     alts = null
                 }
                 if (k?.type == KeyType.BACKSPACE) { repeatKey = null; ui.removeCallbacks(repeater) }
@@ -870,8 +903,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
                     val t = SystemClock.uptimeMillis()
                     for (q in pressed.values) released[q] = t
-                    pressed.clear(); stripDown = -1f; repeatKey = null
+                    pressed.clear(); stripDown = -1f; repeatKey = null; pending.clear()
                     ui.removeCallbacks(repeater); ui.removeCallbacks(longPress); ui.removeCallbacks(commaLongPress); alts = null
+                    longPressPointer = -1; commaPointer = -1
                 }
                 invalidate()
             }

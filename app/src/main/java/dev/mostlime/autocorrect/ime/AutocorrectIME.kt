@@ -367,19 +367,14 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     override fun onSwipe(path: List<Touch>) = ctl.swipe(path)
 
-    /** popup choice: one character replaces the pressed letter; a longer entry takes it back and goes in as text */
-    override fun onAlternate(text: String) {
-        if (text.codePointCount(0, text.length) <= 1) ctl.replaceLastChar(text) else { ctl.replaceLastChar(""); ctl.insertText(text) }
-    }
+    /** popup choice: typed in place of the pressed key (which never typed) */
+    override fun onAlternate(key: KeyDef, text: String, touch: Touch) = ctl.alternate(key, text, touch)
 
     override fun onClipboard() = showClipboard()
 
     override fun onEmoji() = showEmoji()
 
-    override fun onCommaLongPress() {
-        ctl.replaceLastChar("")
-        showEmoji()
-    }
+    override fun onCommaLongPress() = showEmoji()
 
     override fun onPasteChip() {
         val t = clips.recentOffer()?.text ?: return
@@ -418,7 +413,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         val missing = spec != null && !app.store.isInstalled(spec)
         v.status = when {
             !policy.autocorrect -> ""
-            missing -> "model not downloaded: open Autocorrect"
+            missing -> "model not downloaded: open Keylime"
             !app.prefs.debugOverlay -> if (EngineHolder.loading) "loading model…" else if (EngineHolder.lastError != null) "model error" else ""
             else -> buildString {
                 append(EngineHolder.spec?.id ?: if (EngineHolder.loading) "loading…" else "cheap")

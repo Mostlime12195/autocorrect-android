@@ -370,9 +370,9 @@ class KeyboardControllerTest {
     // ---------------------------------------------------------------- swipe typing
     private val path = listOf(Touch(1.5, 0.7), Touch(5.0, 0.7), Touch(8.5, 0.7))
 
-    /** a swipe that starts on key c: the press types c, the view then reports the swipe */
+    /** a swipe that starts on key c: the view never types c (its press waits for the gesture), it reports the swipe */
+    @Suppress("UNUSED_PARAMETER")
     private fun swipe(start: Char) {
-        ctl.key(keyFor(start), KeyGeom.center(start)!!)
         ctl.swipeBegin()
         ctl.swipe(path)
     }
@@ -380,11 +380,12 @@ class KeyboardControllerTest {
     @Test fun swipeInsertsWordWithSpaceAndPunctuationTakesTheSpace() {
         ed.text.append("hello ")
         swipe('w')
-        assertEquals("hello ", ed.text.toString())          // the press's letter was taken back
+        assertEquals("hello ", ed.text.toString())
         val req = engine.swipes.first().first
         assertEquals("hello", req.left); assertEquals(" ", req.sep); assertEquals("", req.casePattern)
         engine.deliverSwipe(listOf("world", "word", "wild"))
         assertEquals("hello world ", ed.text.toString())
+        assertTrue(ed.visible.toString(), "hello w" !in ed.visible)   // the start key's letter never showed
         assertEquals(listOf("world", "word", "wild"), ctl.shown)
         type(".")
         assertEquals("hello world. ", ed.text.toString())
@@ -416,7 +417,7 @@ class KeyboardControllerTest {
     @Test fun swipeWithShiftCapitalisesAndHoldsKeysTypedMeanwhile() {
         ctl.shift = Shift.ON
         swipe('h')
-        assertEquals(Shift.ON, ctl.shift)                    // the press's shift-off was taken back too
+        assertEquals(Shift.ON, ctl.shift)                    // the start key never typed, so shift is still on
         assertEquals("A", engine.swipes.first().first.casePattern)
         type("ok")                                           // typed while the swipe decodes: held
         assertEquals("", ed.text.toString())
@@ -431,5 +432,47 @@ class KeyboardControllerTest {
         engine.deliver()                                     // "teh" corrected and committed first
         engine.deliverSwipe(listOf("quick"))
         assertEquals("the quick ", ed.text.toString())
+    }
+
+    // ---------------------------------------------------------------- long-press popups (the pressed key never typed)
+    private fun alt(base: Char, text: String) = ctl.alternate(keyFor(base), text, KeyGeom.center(base) ?: Touch.APOS)
+
+    @Test fun accentFromAPopupGoesIntoTheWordWithoutTheBaseLetter() {
+        type("caf")
+        alt('e', "é")
+        assertEquals("café", ed.text.toString())
+        assertEquals("café", ed.composingText)
+        assertTrue(ed.visible.toString(), ed.visible.none { it.endsWith("cafe") })
+        type(" ")
+        engine.deliver(engine.queue.size)
+        assertTrue(ed.text.toString(), ed.text.startsWith("caf"))
+        assertTrue(ed.visible.toString(), ed.visible.none { it.contains("cafe") })
+    }
+
+    @Test fun popupAtWordStartFollowsShiftLikeTheLetter() {
+        ctl.shift = Shift.ON
+        alt('e', "é")
+        assertEquals("É", ed.composingText)
+        assertEquals(Shift.OFF, ctl.shift)
+        alt('q', "1")                                        // a letter key's digit stays in the word, as before
+        assertEquals("É1", ed.composingText)
+        assertEquals(listOf("É", "É1"), ed.visible)
+    }
+
+    @Test fun punctuationPopupEndsTheWordWithTheChoice() {
+        timer.fastExpires = false
+        type("the")
+        alt('.', "?")
+        engine.deliver(engine.queue.size)
+        assertEquals("the?", ed.text.toString())
+        assertTrue(ed.visible.toString(), ed.visible.none { it.endsWith(".") })
+    }
+
+    @Test fun longPopupEntryGoesInAsText() {
+        type("the ")
+        engine.deliver(engine.queue.size)
+        alt('e', ":)")
+        assertEquals("the :)", ed.text.toString())
+        assertEquals(listOf("the :)"), ed.visible.drop(ed.visible.lastIndexOf("the ") + 1))   // no "the e" first
     }
 }
