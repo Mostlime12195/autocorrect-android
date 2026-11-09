@@ -38,7 +38,7 @@ class SpellCheckerServiceTest {
         inst.runOnMainSync { session = tsm.newSpellCheckerSession(null, Locale.US, listener, true)!! }
         val text = "i went to teh store"
         session.getSentenceSuggestions(arrayOf(TextInfo(text)), 5)
-        assertTrue("no answer from the spell checker", done.await(30, TimeUnit.SECONDS))
+        assertTrue("no answer from the spell checker", done.await(45, TimeUnit.SECONDS))
         val s = got!!.first()
         val hits = (0 until s.suggestionsCount).map { j ->
             val info = s.getSuggestionsInfoAt(j)

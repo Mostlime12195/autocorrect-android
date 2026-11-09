@@ -91,8 +91,10 @@ class KeylimeSpellChecker : SpellCheckerService() {
     private fun sentence(text: String, limit: Int): List<Pair<SentenceFix, Boolean>> {
         val app = application as App
         app.user.reloadIfChanged()
-        val corr = runCatching { runBlocking { withTimeoutOrNull(3000) { EngineHolder.scope.async { EngineHolder.ensureLexicon(app) }.await() } } }.getOrNull()
-            ?: return emptyList()
+        // the first request after the process starts waits for the lexicon (a few seconds on slow phones)
+        val corr = EngineHolder.corrector ?: runCatching {
+            runBlocking { withTimeoutOrNull(LEXICON_TIMEOUT_MS) { EngineHolder.scope.async { EngineHolder.ensureLexicon(app) }.await() } }
+        }.getOrNull() ?: return emptyList()
         val words = SEG.findAll(text).take(SentenceCheck.MAX_WORDS).toList()
         val out = ArrayList<Pair<SentenceFix, Boolean>>()
         val req = SentenceReq("", text)
@@ -130,5 +132,6 @@ class KeylimeSpellChecker : SpellCheckerService() {
         const val ATTR_GRAMMAR = 0x0008
         /** one word's model check; a slower one falls back to nothing for that word */
         const val WORD_TIMEOUT_MS = 1500L
+        const val LEXICON_TIMEOUT_MS = 20_000L
     }
 }
