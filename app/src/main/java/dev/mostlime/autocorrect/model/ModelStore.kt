@@ -73,7 +73,8 @@ class Manifest(val schema: Int, val updated: String, val baseUrls: List<String>,
                 ModelSpec(
                     id = m["id"]!!.jsonPrimitive.content,
                     label = m["label"]!!.jsonPrimitive.content,
-                    graph = file(m["graph"]!!.jsonObject),
+                    // graph_tree: the one-call tree graph (android_export/tree_graph.py); apps before it read only "graph"
+                    graph = file((m["graph_tree"] ?: m["graph"])!!.jsonObject),
                     vocab = file(m["vocab"]!!.jsonObject),
                     format = m["format"]?.jsonPrimitive?.content ?: "ort",
                     sessionConfig = m["session_config"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap(),
