@@ -9,6 +9,7 @@ import dev.mostlime.autocorrect.engine.CandidateGeneratorV2
 import dev.mostlime.autocorrect.engine.Corrector
 import dev.mostlime.autocorrect.engine.DecodeParams
 import dev.mostlime.autocorrect.engine.Lexicon
+import dev.mostlime.autocorrect.engine.DeviceCpu
 import dev.mostlime.autocorrect.engine.NeuralScorer
 import dev.mostlime.autocorrect.engine.SPTokenizer
 import dev.mostlime.autocorrect.engine.SpatialModel
@@ -61,8 +62,8 @@ object EngineHolder {
         }
     }
 
-    /** ORT intra-op threads: short bursts at word end, so use up to 4 cores */
-    val THREADS = minOf(4, Runtime.getRuntime().availableProcessors()).coerceAtLeast(1)
+    /** ORT intra-op threads: the big cores (up to 4), or 4 on all-little SoCs (DeviceCpu) */
+    val THREADS = DeviceCpu.intraOpThreads()
 
     @Volatile var corrector: Corrector? = null
         private set
@@ -164,7 +165,7 @@ object EngineHolder {
                 lastError = null
                 applyStyle(app)
             }
-            Log.i(TAG, "session ${want.id} ready in $sessionMs ms (cold load $coldLoadMs ms since process start)")
+            Log.i(TAG, "session ${want.id} ready in $sessionMs ms (cold load $coldLoadMs ms since process start), tree=${step.isTree}, threads $THREADS [${DeviceCpu.describe()}]")
         } catch (e: Throwable) {
             lastError = e.toString()
             Log.e(TAG, "session load failed", e)
