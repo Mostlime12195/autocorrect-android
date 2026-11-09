@@ -129,7 +129,7 @@ class LearningTest {
         // tapping the chip is an explicit edit: allowed
         ctl.stripAction()
         assertEquals("so i want the quick brown fox ", ed.text.toString())
-        assertTrue(ed.marks.isEmpty())
+        assertTrue(!ed.marks.containsKey(at))
         assertTrue(events.any { it["outcome"] == "strip_pick" && it["final"] == "the" })
     }
 
@@ -155,7 +155,7 @@ class LearningTest {
         assertTrue(ed.marks.containsKey(0))
         ctl.stripActionLongPress()                         // long-press the "fized → fixed" chip: not a typo
         assertTrue(user.has("fized"))
-        assertTrue(ed.marks.isEmpty())
+        assertTrue(!ed.marks.containsKey(0))
         assertEquals("fized a lot ", ed.text.toString())
         val e = events.single { it["type"] == "not_typo" }
         assertEquals("fized", e["typed"])
@@ -207,6 +207,8 @@ class LearningTest {
         type("tha hte ")
         engine.deliver()
         assertEquals("tha the ", ed.text.toString())
+        assertTrue(ed.marks.isEmpty())                     // underlines only after a pause
+        timer.fireAll()
         assertEquals(listOf("the", "that"), ed.marks[0])
         start(confidentOnly = false)
         ed.text.setLength(0); ed.marks.clear()
