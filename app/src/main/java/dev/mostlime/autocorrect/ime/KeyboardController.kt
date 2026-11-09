@@ -32,6 +32,8 @@ interface Editor {
     fun moveCursor(dir: String) {}
     /** cursor position in the field (-1 = unknown) */
     fun cursorPos(): Int = -1
+    /** does the field keep our SuggestionSpans (read back with styles)? null = can't tell */
+    fun keepsSpans(): Boolean? = null
     /** replace len chars starting offset chars from the cursor (negative = before it); the cursor keeps its place in the text */
     fun replaceRange(offset: Int, len: Int, text: String) {}
     /** text after the cursor (suggest-only idle pass) */
@@ -120,6 +122,8 @@ class ControllerConfig(
     val confidentOnly: Boolean = false,
     /** sentence-start capitals: auto-shift (following the field's CAP flags) and the corrector's sentence capitals */
     val autoCap: Boolean = true,
+    /** flag likely typos (marks + the side chip); off = suggest-only / unsure words just stay as typed */
+    val flagTypos: Boolean = true,
 )
 
 /**
@@ -196,6 +200,7 @@ class KeyboardController(
         override fun textAfter(n: Int) = e.textAfter(n)
         override fun moveCursor(dir: String) { e.moveCursor(dir); invalidatePendings() }
         override fun cursorPos() = e.cursorPos()
+        override fun keepsSpans() = e.keepsSpans()
         override fun replaceRange(offset: Int, len: Int, text: String) {
             e.replaceRange(offset, len, text)
             if (offset + len <= 0) pos += text.length - len else invalidatePendings()
@@ -216,7 +221,7 @@ class KeyboardController(
     private val held = ArrayList<() -> Unit>()
     private var holdToken: Any? = null
 
-    enum class StripMode { NONE, TYPING, LAST_WORD, REWIND, TYPO, DICT_ADDED, RECENT }
+    enum class StripMode { NONE, TYPING, LAST_WORD, REWIND, TYPO, DICT_ADDED, FLAG }
 
     /** the most recent word marked as a likely typo (start = its position in the counter) */
     private class Typo(val start: Long, val typed: String, val fixes: List<String>, val spelling: Boolean,
@@ -232,8 +237,12 @@ class KeyboardController(
     private val flags = ArrayList<Flag>()
     /** the flag the cursor is on (its fixes are in the strip) */
     private var cursorFlag: Flag? = null
-    /** RECENT strip: "teh → the" chips for the latest flagged words behind the cursor, best-guess fix on tap */
-    private var recentFlags: List<Flag> = emptyList()
+    /** the flag in the side chip */
+    private var chipFlag: Flag? = null
+    /** this field drops our SuggestionSpans (seen once): stop attaching them */
+    private var spansDropped = false
+    /** flags whose underline has been attached */
+    private val marked = HashSet<Flag>()
 
     private fun addFlag(f: Flag) {
         flags.removeAll { it.start < f.start + f.word.length && f.start < it.start + it.word.length }
@@ -276,6 +285,7 @@ class KeyboardController(
         config = cfg
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
         typo = null; dictAdded = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
+        chipFlag = null; spansDropped = false; marked.clear()
         idleToken?.let { timer.cancel(it) }; idleToken = null
         lastPress = null; swipeShift = null; swipePending = 0; swipeSpace = false
         releaseHold()
@@ -532,12 +542,37 @@ class KeyboardController(
         idleToken?.let { timer.cancel(it) }
         engine.cancelIdle()
         idleToken = timer.post(IDLE_MS) { idleToken = null; onIdle() }
+        if (stripMode == StripMode.FLAG && composing.isNotEmpty()) setStrip(emptyList(), -1, StripMode.NONE)
     }
 
     private fun onIdle() {
         if (holding || pendings.isNotEmpty() || composing.isNotEmpty() || rewindBusy) return
         if (!config.policy.autocorrect || !config.autocorrect) return
-        if (config.suggestOnly) idleSuggest() else idleRewind()
+        markIdle()
+        if (config.suggestOnly) { if (config.flagTypos) idleSuggest() } else idleRewind()
+    }
+
+    /**
+     * Typing has paused: attach underlines to flagged words that don't have one yet (one small same-text replace per
+     * word, cursor put back). Never while typing, never on cursor moves, and not at all in a field that drops spans.
+     */
+    private fun markIdle() {
+        if (spansDropped || !config.flagTypos) return
+        val ed = ed() ?: return
+        if (ed.hasSelection()) return
+        val cur = ed.cursorPos().takeIf { it >= 0 } ?: return
+        var did = false
+        for (f in flags.filter { it !in marked }.toList()) {
+            if (!locate(ed, f, cur)) continue
+            ed.remark(f.start - cur, f.word, listOf(TypoMark(0, f.word.length, f.fixes)))
+            marked.add(f); did = true
+        }
+        if (did) checkSpans(ed)
+    }
+
+    /** after attaching marks: if the field shows none of them, it drops spans; stop re-committing text there */
+    private fun checkSpans(ed: Editor) {
+        if (ed.keepsSpans() == false && flags.isNotEmpty()) spansDropped = true
     }
 
     /**
@@ -576,7 +611,7 @@ class KeyboardController(
                     for (fx in fixes) addFlag(Flag(s0 + fx.start, fx.from, fx.fixes, isSpellingEdit(fx.from, fx.to), null,
                         (left + text.substring(r.first, r.first + fx.start)).takeLast(LOG_CONTEXT_CHARS)))
                 }
-                e2.remark(r.first - before.length, text.substring(r), fixes.map { TypoMark(it.start, it.from.length, it.fixes) })
+                if (!spansDropped) e2.remark(r.first - before.length, text.substring(r), fixes.map { TypoMark(it.start, it.from.length, it.fixes) })
                 // the strip's flagged word: drop it if this pass found it fine
                 val t = typo
                 if (t != null) {
@@ -587,7 +622,8 @@ class KeyboardController(
                     }
                 }
             }
-            if (stripMode == StripMode.NONE || stripMode == StripMode.RECENT) showRecent()
+            checkSpans(e2)
+            if (stripMode == StripMode.NONE || stripMode == StripMode.FLAG) showFlagChip()
             if (todo.size > batch.size) idleTouch()   // more sentences: next round
         }
     }
@@ -873,17 +909,7 @@ class KeyboardController(
                 }
                 setStrip(emptyList(), -1, StripMode.NONE)
             }
-            StripMode.RECENT -> {
-                val f = recentFlags.getOrNull(i) ?: return
-                val to = f.fixes.first()
-                typo?.let { t -> if (t.typed == f.word) typo = null }
-                if (replaceFlag(ed, f, to)) {
-                    f.event?.let { val e = LinkedHashMap(it); e["outcome"] = "strip_pick"; e["final"] = to; e["ts"] = System.currentTimeMillis(); write(e) }
-                }
-                setStrip(emptyList(), -1, StripMode.NONE)
-                showRecent()
-            }
-            StripMode.DICT_ADDED, StripMode.NONE -> {}
+            StripMode.DICT_ADDED, StripMode.NONE, StripMode.FLAG -> {}
         }
     }
 
@@ -893,6 +919,18 @@ class KeyboardController(
         val ed = ed() ?: return
         when (stripMode) {
             StripMode.TYPO -> notTypo(ed)
+            StripMode.FLAG -> {
+                // an explicit tap on the chip: the only way a flagged word changes
+                val f = chipFlag ?: return
+                chipFlag = null
+                val to = f.fixes.first()
+                typo?.let { t -> if (t.typed == f.word) typo = null }
+                if (replaceFlag(ed, f, to)) {
+                    f.event?.let { val e = LinkedHashMap(it); e["outcome"] = "strip_pick"; e["final"] = to; e["ts"] = System.currentTimeMillis(); write(e) }
+                }
+                setStrip(emptyList(), -1, StripMode.NONE)
+                showFlagChip()
+            }
             StripMode.DICT_ADDED -> {
                 dictAdded?.let { learning.removeWord(it) }
                 dictAdded = null
@@ -900,6 +938,17 @@ class KeyboardController(
             }
             else -> {}
         }
+    }
+
+    /** long-press on the side chip: "not a typo" (spelling) / "ignore" for that word */
+    fun stripActionLongPress() {
+        if (holding) { held.add { stripActionLongPress() }; return }
+        val ed = ed() ?: return
+        if (stripMode != StripMode.FLAG) return
+        cursorFlag = chipFlag ?: return
+        chipFlag = null
+        notTypo(ed)
+        showFlagChip()
     }
 
     /**
@@ -912,7 +961,6 @@ class KeyboardController(
         val w = shown.getOrNull(i) ?: return
         when (stripMode) {
             StripMode.TYPO -> notTypo(ed)
-            StripMode.RECENT -> { cursorFlag = recentFlags.getOrNull(i) ?: return; notTypo(ed); showRecent() }
             StripMode.TYPING -> if (w == composing.toString() && learning.addWord(w)) ui.onDictAdded(w)
             StripMode.LAST_WORD -> {
                 val l = last ?: return
@@ -928,7 +976,9 @@ class KeyboardController(
     private fun notTypo(ed: Editor) {
         cursorFlag?.let { f ->
             cursorFlag = null
-            if (replaceFlag(ed, f, f.word)) {   // same text, without the mark
+            // same text, without the mark (nothing to rewrite where marks never stuck or weren't attached)
+            val ok = if (spansDropped || f !in marked) { flags.remove(f); true } else replaceFlag(ed, f, f.word)
+            if (ok) {
                 // the same word may also be the typing-time flag
                 typo?.let { t -> if (t.typed == f.word) typo = null }
                 learnNotTypo(f.word, f.spelling, f.fixes, f.leftContext, f.event)
@@ -1007,13 +1057,14 @@ class KeyboardController(
 
     /**
      * Mark a finished word as a likely typo instead of correcting it: chosen != typed and the fix beats the typed word
-     * by FLAG_MARGIN. The text stays exactly as typed (only a SuggestionSpan is added). -> false if nothing was marked.
+     * by FLAG_MARGIN. The text stays exactly as typed; the flag goes in the side chip now and gets its underline after a
+     * pause (markIdle). -> false if nothing was flagged.
      */
     private fun flag(pd: Pending, r: WordResult, ev: MutableMap<String, Any?>?, why: String): Boolean {
         val ti = r.slot.typedIdx
         val gap = if (ti < 0) Double.POSITIVE_INFINITY else r.scores[r.chosen] - r.scores[ti]
         val fixes = r.ranked(5).filter { it.lowercase() != pd.typed.lowercase() }.take(3)
-        if (r.out == pd.typed || gap < FLAG_MARGIN || fixes.isEmpty() || learning.isUserWord(pd.typed)) return false
+        if (!config.flagTypos || r.out == pd.typed || gap < FLAG_MARGIN || fixes.isEmpty() || learning.isUserWord(pd.typed)) return false
         val ed = ed() ?: return false
         val cur = composing.toString()
         val core = pd.typed + pd.sepText
@@ -1023,12 +1074,7 @@ class KeyboardController(
         val live = ed.textBefore(core.length + xi + 1)
         val L = live.length
         if (L < core.length + xi || live.substring(L - xi - core.length, L - xi) != core || ed.hasSelection() || !live.endsWith(cur)) return false
-        val after = live.substring(L - xi)
-        ed.beginBatch()
-        if (cur.isNotEmpty()) ed.finishComposing()
-        ed.replaceBefore(core.length + xi, core + after.dropLast(cur.length), TypoMark(0, pd.typed.length, fixes))
-        if (cur.isNotEmpty()) ed.setComposing(cur)
-        ed.endBatch()
+        // nothing is written now: the underline is attached after a pause in typing (markIdle), never mid-typing
         val spelling = isSpellingEdit(pd.typed, r.out)
         ev?.let { it["outcome"] = "flagged"; it["final"] = pd.typed; it["flag"] = why; it["flag_kind"] = if (spelling) "spelling" else "other"; write(it) }
         typo = Typo(pd.anchor - core.length, pd.typed, fixes, spelling, ev, pd.before.takeLast(LOG_CONTEXT_CHARS))
@@ -1040,32 +1086,23 @@ class KeyboardController(
     }
 
     /**
-     * Strip for flagged words: right after the flagged word, its fixes; once the user has typed on, chips like
-     * "teh → the" for the latest flagged words behind the cursor (a tap fixes that word in place). Works in every app,
-     * also those that drop SuggestionSpans.
+     * The flagged-word chip: one small "teh → the" chip at the side of an otherwise empty strip (never in place of the
+     * word's candidates or anything else), for the latest flagged word behind the cursor. Tap = fix it in place,
+     * long-press = not a typo. Works in every app, also those that drop SuggestionSpans.
      */
-    private fun showTypo() {
-        if (composing.isNotEmpty()) return
-        val t = typo
-        if (t != null && pos - (t.start + t.typed.length) <= 2) {
-            setStrip(t.fixes, 0, StripMode.TYPO, hint = "typo?", action = if (t.spelling) "not a typo" else "ignore")
-            return
-        }
-        if (t != null && pos - (t.start + t.typed.length) > MAX_AFTER) typo = null
-        showRecent()
-    }
+    private fun showTypo() = showFlagChip()
 
-    private fun showRecent() {
-        if (composing.isNotEmpty() || flags.isEmpty()) return
+    private fun showFlagChip() {
+        if (composing.isNotEmpty() || flags.isEmpty() || (stripMode != StripMode.NONE && stripMode != StripMode.FLAG)) return
         val ed = ed() ?: return
         val cur = ed.cursorPos()
         if (cur < 0) return
         // only flags whose word is still there (edited words drop out)
-        val recent = flags.filter { it.start <= cur && cur - it.start <= IDLE_CHARS }.sortedByDescending { it.start }
-            .filter { locate(ed, it, cur) }.take(3)
-        if (recent.isEmpty()) return
-        recentFlags = recent
-        setStrip(recent.map { "${it.word} → ${it.fixes.first()}" }, 0, StripMode.RECENT, hint = if (recent.size == 1) "typo?" else "typos?")
+        val f = flags.filter { it.start <= cur && cur - it.start <= IDLE_CHARS }.sortedByDescending { it.start }
+            .firstOrNull { locate(ed, it, cur) } ?: run { if (stripMode == StripMode.FLAG) setStrip(emptyList(), -1, StripMode.NONE); return }
+        chipFlag = f
+        fun short(w: String) = if (w.length > 14) w.take(13) + "…" else w
+        setStrip(emptyList(), -1, StripMode.FLAG, action = "${short(f.word)} → ${short(f.fixes.first())}")
     }
 
     /**
@@ -1260,8 +1297,12 @@ class KeyboardController(
         suggestToken = null
     }
 
+    /** the strip's side chip label (tests / accessibility) */
+    var shownAction: String? = null
+        private set
+
     private fun setStrip(s: List<String>, bold: Int, mode: StripMode, undo: Int = -1, hint: String = "", action: String? = null) {
-        shown = s; stripMode = mode
+        shown = s; stripMode = mode; shownAction = action
         ui.showStrip(s, bold, undo, hint, action)
     }
 
@@ -1334,7 +1375,8 @@ class KeyboardController(
         const val WORD_END_PUNCT = ".,!?;:)\""
         val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")
         /** idle passes start after this pause in typing */
-        const val IDLE_MS = 400L
+        /** idle passes (marks, sentence re-check, far rewind) only after this long without typing */
+        const val IDLE_MS = 1500L
         const val IDLE_CHARS = 2000
         const val IDLE_LEFT = 200
         const val IDLE_SENTENCES = 6

@@ -30,6 +30,12 @@ class IcEditor(
      * before the cursor; if the field didn't take it (React Native inputs can be flaky with regions), the span from the
      * word to the cursor is deleted and typed again with the fix (cursor-relative, no absolute offsets needed).
      */
+    override fun keepsSpans(): Boolean? {
+        val t = ic?.getTextBeforeCursor(2000, InputConnection.GET_TEXT_WITH_STYLES) ?: return null
+        if (t !is android.text.Spanned) return false
+        return t.getSpans(0, t.length, android.text.style.SuggestionSpan::class.java).any { (it.flags and android.text.style.SuggestionSpan.FLAG_MISSPELLED) != 0 }
+    }
+
     override fun replaceRange(offset: Int, len: Int, text: String) {
         val c = ic ?: return
         val cur = cursorPos().takeIf { it >= 0 } ?: return

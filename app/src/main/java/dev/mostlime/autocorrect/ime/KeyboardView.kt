@@ -95,6 +95,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         fun onSuggestionLongPress(index: Int) {}
         /** the strip's action chip ("not a typo", "ignore", "undo") */
         fun onStripAction() {}
+        fun onStripActionLongPress() {}
         fun onSwitchIme()
         fun onSettings()
         fun onClipboard() {}
@@ -260,7 +261,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private var stripLongDone = false
     private val stripLongPress = Runnable {
         val x = stripDown
-        if (x < 0 || suggestions.isEmpty() || (!actionRect.isEmpty && x >= actionRect.left - 4 * dp)) return@Runnable
+        if (x < 0) return@Runnable
+        if (!actionRect.isEmpty && x >= actionRect.left - 4 * dp) { stripLongDone = true; buzz(strong = true); listener.onStripActionLongPress(); return@Runnable }
+        if (suggestions.isEmpty()) return@Runnable
         val si = intArrayOf(1, 0, 2)[(x / (cellsW() / 3f)).toInt().coerceIn(0, 2)]
         if (si < suggestions.size) { stripLongDone = true; buzz(strong = true); listener.onSuggestionLongPress(si) }
     }
@@ -514,8 +517,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         val order = intArrayOf(1, 0, 2)   // best suggestion in the middle
         actionRect.setEmpty()
         val action = stripAction
-        if (action != null && suggestions.isNotEmpty()) {
-            // action chip at the right end ("not a typo", "ignore", "undo")
+        if (action != null) {
+            // action chip at the right end ("not a typo", "ignore", "undo", or a flagged word "teh → the")
             val l = actionLeft()
             actionRect.set(l, 9 * dp, width - 8 * dp, stripH - 9 * dp)
             keyPaint.color = pal.accentSoft
@@ -542,7 +545,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 ic.setBounds(l, tp, l + sz, tp + sz); ic.setTint(pal.dim); ic.alpha = 255; ic.draw(canvas)
             }
             val clip = clipChip
-            if (clip != null) {
+            if (clip != null && actionRect.isEmpty) {
                 // paste chip with the start of the copied text
                 stripPaint.typeface = Typeface.DEFAULT; stripPaint.color = pal.fg; stripPaint.textSize = 14 * dp
                 var label = clip.replace('\n', ' ').trim()

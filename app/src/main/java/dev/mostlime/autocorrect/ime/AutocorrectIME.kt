@@ -295,7 +295,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         ctl.lettersLayer = v?.layer?.isLetters == true
         app.user.reloadIfChanged()   // the settings screen may have edited the dictionary
         ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME,
-            suggestOnly = app.prefs.suggestOnly, confidentOnly = app.prefs.confidentOnly, autoCap = app.prefs.autoCap))
+            suggestOnly = app.prefs.suggestOnly, confidentOnly = app.prefs.confidentOnly, autoCap = app.prefs.autoCap,
+            flagTypos = app.prefs.flagTypos))
         root?.hidePanel()
         if (!app.prefs.clipboard) clips.clear()
         updateClipChip()
@@ -359,6 +360,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     override fun onSuggestionLongPress(index: Int) = ctl.longPressSuggestion(index)
 
     override fun onStripAction() = ctl.stripAction()
+
+    override fun onStripActionLongPress() = ctl.stripActionLongPress()
 
     override fun onSwipeStart() = ctl.swipeBegin()
 

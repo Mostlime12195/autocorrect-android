@@ -31,6 +31,8 @@ class Prefs(private val ctx: Context) {
     /** "suggest" = never edit the text, only underline likely typos and suggest fixes */
     val suggestOnly get() = sp.getString(CORRECTION_MODE, "auto") == "suggest"
     val confidentOnly get() = sp.getBoolean(CONFIDENT_ONLY, false)
+    /** "Flag likely typos": until the user sets it, on in suggest-only mode and off in auto-correct mode */
+    val flagTypos get() = if (sp.contains(FLAG_TYPOS)) sp.getBoolean(FLAG_TYPOS, true) else suggestOnly
     val swipe get() = sp.getBoolean(SWIPE, true)
     val clipboard get() = sp.getBoolean(CLIPBOARD, true)
     val numberRow get() = sp.getBoolean(NUMBER_ROW, false)
@@ -121,6 +123,7 @@ class Prefs(private val ctx: Context) {
         const val AUTO_CAP = "auto_cap"
         const val CORRECTION_MODE = "correction_mode"
         const val CONFIDENT_ONLY = "confident_only"
+        const val FLAG_TYPOS = "flag_typos"
         const val SWIPE = "swipe_typing"
         const val CLIPBOARD = "clipboard"
         const val NUMBER_ROW = "number_row"

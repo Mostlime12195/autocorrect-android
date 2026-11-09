@@ -56,10 +56,13 @@ class SuggestOnlyEditTextTest {
         override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
         override fun cancelQueued() {}
     }
+    /** short delays run at once; the idle timer waits for fire() */
+    private val idle = LinkedHashMap<Any, () -> Unit>()
     private val timer = object : Timer {
-        override fun post(delayMs: Long, r: () -> Unit): Any { if (delayMs < 100) r(); return Any() }
-        override fun cancel(token: Any) {}
+        override fun post(delayMs: Long, r: () -> Unit): Any { val t = Any(); if (delayMs < 100) r() else idle[t] = r; return t }
+        override fun cancel(token: Any) { idle.remove(token) }
     }
+    private fun fire() { val t = idle.values.toList(); idle.clear(); t.forEach { it() } }
 
     @Test fun suggestOnlyMarksAMisspellingWithASuggestionSpan() {
         lateinit var et: EditText
@@ -81,6 +84,9 @@ class SuggestOnlyEditTextTest {
             }
         }
         inst.runOnMainSync {
+            // nothing is written while typing; the underline comes after a pause
+            assertTrue(et.text.getSpans(0, et.text.length, SuggestionSpan::class.java).none { (it.flags and SuggestionSpan.FLAG_MISSPELLED) != 0 })
+            fire()
             val text = et.text
             assertEquals("so teh ", text.toString())
             val spans = text.getSpans(0, text.length, SuggestionSpan::class.java)
@@ -94,12 +100,63 @@ class SuggestOnlyEditTextTest {
                 ctl.key(k, Touch.APOS)
             }
             assertTrue(et.text.getSpans(0, et.text.length, SuggestionSpan::class.java).any { (it.flags and SuggestionSpan.FLAG_MISSPELLED) != 0 })
-            assertEquals(KeyboardController.StripMode.RECENT, ctl.stripMode)
-            assertEquals("teh → the", ctl.shown[0])
-            ctl.pickSuggestion(0)
+            assertEquals(KeyboardController.StripMode.FLAG, ctl.stripMode)
+            assertEquals("teh → the", ctl.shownAction)
+            ctl.stripAction()
             assertEquals("so the quick brown fox ", et.text.toString())
             assertEquals(et.text.length, et.selectionStart)
         }
+    }
+
+    /**
+     * A field that drops spans (like React Native / Discord: every edit re-sets plain text), real async timing: corrections
+     * arrive 80 ms late, keys every 40 ms, idle passes on a real 1.5 s timer. The text must end exactly as typed.
+     */
+    @Test fun fastTypingInASpanDroppingFieldEndsExactlyAsTyped() {
+        val typed = "so teh quick brown fox jumps over teh lazy dog and then fized it "
+        lateinit var et: EditText
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        val realTimer = object : Timer {
+            override fun post(delayMs: Long, r: () -> Unit): Any { val t = Runnable { r() }; h.postDelayed(t, delayMs); return t }
+            override fun cancel(token: Any) { h.removeCallbacks(token as Runnable) }
+        }
+        val slow = object : CorrectionEngine {
+            override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) {
+                val r = engine.let { e -> var out: WordResult? = null; e.correct(req) { out = it }; out }
+                h.postDelayed({ done(r) }, 80)
+            }
+            override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
+            override fun cancelQueued() {}
+        }
+        inst.runOnMainSync {
+            et = EditText(ctx)
+            et.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(e: android.text.Editable) {
+                    for (sp in e.getSpans(0, e.length, SuggestionSpan::class.java)) e.removeSpan(sp)
+                }
+            })
+            val info = EditorInfo().apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }
+            val ic = et.onCreateInputConnection(info)
+            val ed = IcEditor(ctx, { ic }, { info }, {}, {})
+            val ctl = KeyboardController({ ed }, slow, object : ControllerUi {
+                override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
+                override fun setShift(shift: Shift) {}
+                override fun onResult(r: WordResult?) {}
+            }, realTimer) {}
+            ctl.startInput(ControllerConfig(FieldPolicy.of(android.text.InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "t" }, "t", suggestOnly = true))
+            typed.forEachIndexed { i, c ->
+                // a 2 s pause in the middle lets the idle pass try its marks
+                val at = i * 40L + if (i > 34) 2000L else 0L
+                h.postDelayed({
+                    val k = if (c == ' ') KeyboardLayout.LETTERS.keys.first { it.type == KeyType.SPACE } else KeyboardLayout.LETTERS.keys.first { it.text == c.toString() }
+                    ctl.key(k, Touch.APOS)
+                }, at)
+            }
+        }
+        Thread.sleep(typed.length * 40L + 2000L + 2500L)
+        inst.runOnMainSync { assertEquals(typed, et.text.toString()) }
     }
 
     @Test fun bigJpegBackgroundIsSavedAtScreenWidth() {

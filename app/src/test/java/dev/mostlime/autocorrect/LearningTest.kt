@@ -114,15 +114,20 @@ class LearningTest {
         type("so i want teh quick brown fox ")
         engine.deliver()
         assertEquals("so i want teh quick brown fox ", ed.text.toString())   // not even i -> I
-        val at = "so i want ".length
-        assertEquals("the", ed.marks[at]?.first())
-        // the user is past the word: a chip "teh → the" fixes it in place
-        assertEquals(StripMode.RECENT, ctl.stripMode)
-        assertEquals("teh → the", ctl.shown[0])
+        assertTrue(ed.marks.isEmpty())                     // nothing written while typing
+        // one small chip at the side; the strip's word cells stay empty for candidates
+        assertEquals(StripMode.FLAG, ctl.stripMode)
+        assertEquals("teh → the", ctl.shownAction)
+        assertTrue(ctl.shown.isEmpty())
         assertEquals(0, engine.rewinds)
         assertTrue(events.any { it["outcome"] == "flagged" && it["typed"] == "teh" })
-        // tapping a fix is an explicit edit: allowed
-        ctl.pickSuggestion(0)
+        // a pause: the underline is attached
+        timer.fireAll()
+        val at = "so i want ".length
+        assertEquals("the", ed.marks[at]?.first())
+        assertEquals("so i want teh quick brown fox ", ed.text.toString())
+        // tapping the chip is an explicit edit: allowed
+        ctl.stripAction()
         assertEquals("so i want the quick brown fox ", ed.text.toString())
         assertTrue(ed.marks.isEmpty())
         assertTrue(events.any { it["outcome"] == "strip_pick" && it["final"] == "the" })
@@ -134,19 +139,21 @@ class LearningTest {
         engine.deliver()                                   // lands while the next word is composing
         assertEquals("teh qui", ed.text.toString())
         assertEquals("qui", ed.composingText)
-        assertEquals("the", ed.marks[0]?.first())
+        assertTrue(ed.marks.isEmpty())
+        assertEquals(StripMode.NONE, ctl.stripMode)        // the chip never takes the strip while a word is composed
         type("ck ")
         engine.deliver()
         assertEquals("teh quick ", ed.text.toString())
-        assertEquals(StripMode.RECENT, ctl.stripMode)      // the flagged word comes back once nothing is composing
+        assertEquals(StripMode.FLAG, ctl.stripMode)        // the flagged word comes back once nothing is composing
     }
 
     @Test fun notATypoClearsMarkAddsWordAndLogs() {
         start(suggestOnly = true)
         type("fized a lot ")
         engine.deliver()
+        timer.fireAll()
         assertTrue(ed.marks.containsKey(0))
-        ctl.longPressSuggestion(0)                         // long-press the "fized → fixed" chip: not a typo
+        ctl.stripActionLongPress()                         // long-press the "fized → fixed" chip: not a typo
         assertTrue(user.has("fized"))
         assertTrue(ed.marks.isEmpty())
         assertEquals("fized a lot ", ed.text.toString())
@@ -164,8 +171,9 @@ class LearningTest {
         engine.crafted["their"] = result("their", listOf("their", "there"), doubleArrayOf(0.0, 5.0))
         type("i went their ")
         engine.deliver()
+        timer.fireAll()
         assertTrue(ed.marks.isNotEmpty())                  // their -> there flagged
-        ctl.longPressSuggestion(0)                         // "ignore" for an in-vocab confusable
+        ctl.stripActionLongPress()                         // "ignore" for an in-vocab confusable
         assertFalse(user.has("their"))
         assertTrue(user.penalty("their", "there") > 0)
         assertTrue(events.any { it["type"] == "suppress" && it["source"] == "ignore" })
@@ -317,7 +325,7 @@ class LearningTest {
         start(suggestOnly = true)
         type("so teh quick brown fox is great ")
         engine.deliver()
-        assertEquals(StripMode.RECENT, ctl.stripMode)
+        assertEquals(StripMode.FLAG, ctl.stripMode)
         ctl.pickSuggestion(-1)                              // nothing
         // the user moves on; the strip shows something else
         type("a")
@@ -332,15 +340,37 @@ class LearningTest {
         assertEquals("so the quick brown fox is great ", ed.text.toString())
     }
 
-    /** right after the flagged word the strip has its fixes and the "not a typo" chip */
-    @Test fun rightAfterTheWordTheStripOffersItsFixes() {
+    /** the chip is the only way a flag changes text: tapping the strip's cells or pressing space never applies a fix */
+    @Test fun onlyTheChipAppliesAFix() {
         start(suggestOnly = true)
         type("so teh ")
         engine.deliver()
-        assertEquals(StripMode.TYPO, ctl.stripMode)
-        assertEquals("the", ctl.shown[0])
-        ctl.pickSuggestion(0)
-        assertEquals("so the ", ed.text.toString())
+        assertEquals(StripMode.FLAG, ctl.stripMode)
+        for (i in 0..2) ctl.pickSuggestion(i)
+        type(" ")
+        assertEquals("so teh  ", ed.text.toString())
+        ctl.stripAction()
+        assertTrue(ed.text.toString(), ed.text.startsWith("so the"))
+    }
+
+    /** a field that drops spans (Discord / React Native): fast typing with a flagged word ends exactly as typed */
+    @Test fun spanDroppingFieldKeepsExactlyWhatWasTyped() {
+        start(suggestOnly = true)
+        ed.dropsSpans = true
+        fun fast(t: String) {
+            for ((i, c) in t.withIndex()) { type(c.toString()); if (i % 7 == 3) engine.deliver() }   // results land mid-typing
+            engine.deliver()
+        }
+        val a = "so teh quick brown fox jumps over "
+        val b = "teh lazy dog and then fized it "
+        fast(a)
+        timer.fireAll()                                     // a pause: marks are tried once, the field drops them
+        val editsAfterPause = ed.edits
+        fast(b)
+        timer.fireAll()
+        assertEquals(a + b, ed.text.toString())
+        assertTrue(ed.marks.isEmpty())
+        assertEquals("no more re-commits once the field dropped a span", editsAfterPause, ed.edits)
     }
 
     @Test fun spellingClassification() {

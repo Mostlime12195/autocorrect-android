@@ -116,7 +116,17 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             }
             val confident = findPreference<Preference>(Prefs.CONFIDENT_ONLY)
             confident?.isEnabled = !app.prefs.suggestOnly
-            findPreference<Preference>(Prefs.CORRECTION_MODE)?.setOnPreferenceChangeListener { _, v -> confident?.isEnabled = v != "suggest"; true }
+            // not persisted by the widget: the default follows the mode until the user sets it
+            val flagSw = findPreference<androidx.preference.SwitchPreferenceCompat>(Prefs.FLAG_TYPOS)?.apply {
+                isChecked = app.prefs.flagTypos
+                summary = "Underline words that look mistyped (after a pause in typing) and offer a \"teh → the\" chip at the side of the strip"
+                setOnPreferenceChangeListener { _, v -> app.prefs.sp.edit().putBoolean(Prefs.FLAG_TYPOS, v as Boolean).apply(); true }
+            }
+            findPreference<Preference>(Prefs.CORRECTION_MODE)?.setOnPreferenceChangeListener { _, v ->
+                confident?.isEnabled = v != "suggest"
+                if (!app.prefs.sp.contains(Prefs.FLAG_TYPOS)) flagSw?.isChecked = v == "suggest"
+                true
+            }
             findPreference<Preference>("clear_learned")?.setOnPreferenceClickListener {
                 app.user.clearLearned(); Toast.makeText(requireContext(), "Undone edits forgotten", Toast.LENGTH_SHORT).show(); true
             }

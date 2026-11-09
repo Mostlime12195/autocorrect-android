@@ -68,6 +68,11 @@ class KeyboardControllerTest {
         }
         /** typo marks (SuggestionSpans in the app): start in the text -> suggestions */
         val marks = HashMap<Int, List<String>>()
+        /** like Discord / React Native inputs: spans are dropped (text re-commits still happen) */
+        var dropsSpans = false
+        /** every text change (to count edits made while typing) */
+        var edits = 0
+        override fun keepsSpans(): Boolean? = if (dropsSpans) false else marks.isNotEmpty()
         override fun cursorPos() = text.length
         override fun replaceRange(offset: Int, len: Int, text: String) {
             val start = this.text.length + offset
@@ -78,13 +83,14 @@ class KeyboardControllerTest {
         override fun remark(offset: Int, text: String, marks: List<TypoMark>) {
             val start = this.text.length + offset
             if (start < 0 || this.text.substring(start, minOf(this.text.length, start + text.length)) != text) return
+            edits++
             this.marks.keys.removeAll { it >= start && it < start + text.length }
-            for (m in marks) this.marks[start + m.start] = m.suggestions
+            if (!dropsSpans) for (m in marks) this.marks[start + m.start] = m.suggestions
         }
         override fun replaceBefore(n: Int, text: String, mark: TypoMark?) {
             val start = this.text.length - n
             replaceBefore(n, text)
-            if (mark != null) marks[start + mark.start] = mark.suggestions
+            if (mark != null && !dropsSpans) marks[start + mark.start] = mark.suggestions
         }
         override fun beginBatch() { depth++ }
         override fun endBatch() { depth--; shown() }
