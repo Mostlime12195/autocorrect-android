@@ -25,12 +25,15 @@ COMMIT=$(gh release view "$TAG" -R "$REPO" --json targetCommitish --jq .targetCo
 # notes: the commit subjects since the previous release (README-only commits left out)
 PREV=$(gh release list -R "$REPO" -L 20 --json tagName --jq '.[].tagName' | grep -A1 -x "$TAG" | tail -n +2 | head -1)
 if [ -n "$PREV" ]; then
-  NOTES=$(gh api "repos/$REPO/compare/$PREV...$TAG" --jq '.commits[].commit.message | split("\n")[0]' | grep -v '^README' | grep -v '^Merge' | paste -sd ';' | sed 's/;/; /g')
+  NOTES=$(gh api "repos/$REPO/compare/$PREV...$TAG" --jq '.commits[].commit.message | split("\n")[0]' | sed 's/ *\[skip ci\]//g' \
+    | grep -v -E '^(README|Merge|MIT license|Smoke test|Tests:)' | paste -sd ';' | sed 's/;/; /g')
 fi
-[ -n "${NOTES:-}" ] || NOTES=$(gh api "repos/$REPO/commits/$COMMIT" --jq .commit.message | head -1)
+[ -n "${NOTES:-}" ] || NOTES=$(gh api "repos/$REPO/commits/$COMMIT" --jq .commit.message | head -1 | sed 's/ *\[skip ci\]//g')
 
 if gh release view "app-v$V" -R "$PUB" >/dev/null 2>&1; then
-  gh release upload "app-v$V" "$APK" -R "$PUB" --clobber
+  # already published (a re-run for latest.json): never re-upload the same APK (the CDN may cache 404s meanwhile)
+  HAVE=$(gh api "repos/$PUB/releases/tags/app-v$V" --jq ".assets[] | select(.name == \"autocorrect-$V.apk\") | .size")
+  [ "$HAVE" = "$SIZE" ] || gh release upload "app-v$V" "$APK" -R "$PUB" --clobber
 else
   gh release create "app-v$V" "$APK" -R "$PUB" --latest=false --title "Autocorrect keyboard $V" \
     --notes "App APK for the in-app updater (the keyboard repo is private). $NOTES"
