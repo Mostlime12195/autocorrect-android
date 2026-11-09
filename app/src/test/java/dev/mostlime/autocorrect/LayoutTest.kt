@@ -54,6 +54,14 @@ class LayoutTest {
         assertTrue("/" in KeyboardLayout.alternates(KeyboardLayout.LETTERS.keys.first { it.text == "." }))
     }
 
+    /** the gesture dead band never reaches above our own bottom padding (Galaxy A12: 48 dp inset, no padding) */
+    @Test fun gestureDeadBandStaysInOurPadding() {
+        assertTrue(dev.mostlime.autocorrect.ime.KeyboardView.deadBand(126, 0) == 0)
+        assertTrue(dev.mostlime.autocorrect.ime.KeyboardView.deadBand(126, 63) == 63)
+        assertTrue(dev.mostlime.autocorrect.ime.KeyboardView.deadBand(40, 63) == 40)
+        assertTrue(dev.mostlime.autocorrect.ime.KeyboardView.deadBand(0, 63) == 0)
+    }
+
     @Test fun numberRowKeepsLetterTouchesInModelUnits() {
         val l = KeyboardLayout.LETTERS_NUM
         val q = l.keys.first { it.text == "q" }

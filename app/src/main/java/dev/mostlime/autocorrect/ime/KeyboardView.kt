@@ -382,6 +382,17 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     /** bottom band where the system's own gestures start (gesture navigation's swipe up): touches starting there are ignored */
     private var gestureBottom = 0
 
+    /**
+     * The part of the system-gesture band that lies in our own bottom padding: touches starting there are the system's.
+     * Never more than bottomInset, so keys keep their whole hit area (3-button nav / Samsung non-edge-to-edge IME windows
+     * report a ~48 dp gesture inset with no padding of ours under the keys; using it raw killed the bottom row).
+     */
+    private val deadBottom get() = deadBand(gestureBottom, bottomInset)
+
+    /** tests: insets as a phone would report them */
+    @androidx.annotation.VisibleForTesting
+    fun setInsetsForTest(gesturePx: Int, bottomPx: Int) { gestureBottom = gesturePx; bottomInset = bottomPx; requestLayout() }
+
     private fun gestureBottomOf(ins: WindowInsets?): Int {
         if (ins == null) return 0
         return when {
@@ -739,7 +750,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 val y = e.getY(i)
                 if (alts != null) return true   // one alternates popup at a time
                 // the system's swipe-up (gesture navigation) starts here: never a key press
-                if (gestureBottom > 0 && y >= height - gestureBottom) return true
+                if (deadBottom > 0 && y >= height - deadBottom) return true
                 if (track?.started == true) return true   // other fingers are ignored during a swipe
                 track = null                              // a second finger: fast typing, not a swipe
                 if (y < stripH) {
@@ -829,7 +840,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (k?.type == KeyType.SPACE && e.actionMasked != MotionEvent.ACTION_CANCEL) {
                     keyRect(k, rect)
                     val ux = e.getX(i); val uy = e.getY(i)
-                    if (ux >= rect.left - 4 * dp && ux <= rect.right + 4 * dp && uy >= rect.top - 8 * dp && uy <= height - gestureBottom.toFloat())
+                    if (ux >= rect.left - 4 * dp && ux <= rect.right + 4 * dp && uy >= rect.top - 8 * dp && uy <= height - deadBottom.toFloat())
                         listener.onKey(k, Touch.APOS)
                 }
                 if (k?.type == KeyType.TO_SYMBOLS && e.actionMasked != MotionEvent.ACTION_CANCEL) {
@@ -871,6 +882,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     companion object {
         const val REPEAT_START_MS = 400L
         const val LONG_PRESS_MS = 500L
+        /** dead band at the bottom for touch downs: only where the gesture band overlaps our own bottom padding */
+        fun deadBand(gestureBottom: Int, bottomInset: Int) = minOf(gestureBottom, bottomInset).coerceAtLeast(0)
         const val LONG_PRESS_ALT_MS = 380L
         /** a swipe must also have moved this far from its start (key widths; rows count as key heights) */
         const val SWIPE_MIN_KEYS = 0.75f
