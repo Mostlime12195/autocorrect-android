@@ -41,9 +41,10 @@ class UploadClientTest {
     }
 
     @Test fun envelopeIsValidJson() {
-        val lines = listOf(EventLog.toJson(mapOf("v" to 1, "ts" to 1L, "type" to "perf", "x" to listOf(1.5, null))).toString())
-        val o = Json.parseToJsonElement(UploadClient.envelope("id", "0.1.1", 5L, lines)).jsonObject
-        assertEquals("autocorrect-events/1", o["schema"]!!.jsonPrimitive.content)
+        val lines = listOf(EventLog.toJson(mapOf("v" to 2, "id" to "abcdefgh", "typed" to "te\"h", "x" to listOf(1.5, null))).toString())
+        val o = Json.parseToJsonElement(UploadClient.envelope("id", "0.1.1", lines)).jsonObject
+        assertEquals("autocorrect-events/2", o["schema"]!!.jsonPrimitive.content)
+        assertEquals(setOf("schema", "install_id", "app_version", "events"), o.keys)   // v2 has no sent_at
         assertEquals(1, o["events"]!!.jsonArray.size)
     }
 
@@ -79,20 +80,21 @@ class UploadClientTest {
     }
 
     /**
-     * Against the live collection server (AC_LIVE_UPLOAD=1): events made by the real KeyboardController, serialized
-     * like EventLog, in the worker's envelope -> stored, deduped on retry, the server's 4xx codes map to the right
-     * action, and DELETE removes everything for that install id.
+     * Against the live collection server (AC_LIVE_UPLOAD=1): v2 events made by the real KeyboardController +
+     * CorrectionLog, serialized like the queue, in the worker's envelope -> all accepted by the server's strict
+     * validation, deduped on retry, the server's 4xx codes map to the right action, and DELETE removes everything.
      */
     @Test fun liveServer() {
         assumeTrue(System.getenv("AC_LIVE_UPLOAD") == "1")
         val ed = KeyboardControllerTest.FakeEditor()
         val engine = KeyboardControllerTest.SlowEngine()
         val events = ArrayList<Map<String, Any?>>()
+        val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ events.add(it) }, { false })
         val ctl = KeyboardController({ ed }, engine, object : ControllerUi {
             override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
             override fun setShift(shift: Shift) {}
             override fun onResult(r: WordResult?) {}
-        }, KeyboardControllerTest.ManualTimer()) { events.add(it) }
+        }, KeyboardControllerTest.ManualTimer(), corrections = corrections) {}
         ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "m2s_int4" }, "0.0.0-test"))
         for (c in "teh quick brown fox is it fized ") {
             val k = if (c == ' ') KeyboardLayout.LETTERS.keys.first { it.type == KeyType.SPACE } else KeyboardLayout.LETTERS.keys.first { it.text == c.toString() }
@@ -103,18 +105,18 @@ class UploadClientTest {
         ctl.finishInput()
         val lines = events.map { EventLog.toJson(it).toString() }
         println("events: ${lines.size}\n${lines.joinToString("\n")}")
-        assertTrue(lines.any { "\"type\":\"autocorrect\"" in it })
+        assertTrue(lines.any { "\"type\":\"correction\"" in it })
 
         val id = UUID.randomUUID().toString()
         println("install_id $id")
         val url = Prefs.DEFAULT_UPLOAD_URL
-        fun up(lines: List<String>, install: String = id) = UploadClient.post(url, UploadClient.envelope(install, "0.0.0-test", System.currentTimeMillis(), lines))
+        fun up(lines: List<String>, install: String = id) = UploadClient.post(url, UploadClient.envelope(install, "0.0.0-test", lines))
         try {
             val r1 = up(lines)
             println("upload: ${r1.code} ${r1.body}")
             assertEquals(Action.ADVANCE, UploadClient.classify(r1.code))
             val o1 = Json.parseToJsonElement(r1.body).jsonObject
-            assertEquals(lines.size, o1["stored"]!!.jsonPrimitive.int)
+            assertEquals(r1.body, lines.size, o1["stored"]!!.jsonPrimitive.int)
             val r2 = up(lines)
             println("retry: ${r2.code} ${r2.body}")
             assertEquals(lines.size, Json.parseToJsonElement(r2.body).jsonObject["duplicates"]!!.jsonPrimitive.int)

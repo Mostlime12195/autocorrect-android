@@ -64,6 +64,8 @@ class UserData(private val dictFile: File?, private val learnFile: File?, privat
     @Synchronized fun has(word: String): Boolean = word.isNotEmpty() && (words.containsKey(word.lowercase()) || probation.containsKey(word.lowercase()))
     /** auto-learned words still on probation (settings shows them as "learning") */
     @Synchronized fun probationWords(): List<String> = probation.values.map { it.word }
+    /** an auto-learned word still on probation (upload quality guard: its events aren't sent) */
+    @Synchronized fun onProbation(word: String): Boolean = probation.containsKey(word.lowercase())
     @Synchronized fun words(): List<String> = words.values.toList()
     val size @Synchronized get() = words.size
 

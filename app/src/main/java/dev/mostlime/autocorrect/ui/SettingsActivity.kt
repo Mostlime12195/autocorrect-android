@@ -111,11 +111,18 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 true
             }
             findPreference<Preference>(Prefs.SHARE)?.setOnPreferenceChangeListener { _, on ->
-                // opt-in applies to new events only: start uploading from the current end of the log
-                if (on == true) lifecycleScope.launch { app.prefs.uploadOffset = withContext(Dispatchers.IO) { app.events.endOffset() } }
+                // opt-in applies to new corrections only; switching it off drops whatever is still queued
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) {
+                        if (on != true) app.corrections.clear()
+                        app.prefs.corrUploadOffset = app.corrections.endOffset()
+                    }
+                    refresh()
+                }
                 view?.post { UploadWorker.schedule(requireContext(), app.prefs) }
                 true
             }
+            findPreference<Preference>("upload_preview")?.setOnPreferenceClickListener { showUploadPreview(); true }
             val confident = findPreference<Preference>(Prefs.CONFIDENT_ONLY)
             confident?.isEnabled = !app.prefs.suggestOnly
             // not persisted by the widget: the default follows the mode until the user sets it
@@ -511,11 +518,37 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             }
             lifecycleScope.launch {
                 val (n, bytes) = withContext(Dispatchers.IO) { app.events.count() to app.events.sizeBytes() }
-                findPreference<Preference>("log_info")?.summary = "$n events, ${bytes / 1024} KB, stored on this phone" +
-                    (if (app.prefs.share) " (new events are uploaded)" else "") +
+                findPreference<Preference>("log_info")?.summary = "$n events, ${bytes / 1024} KB, stored on this phone (never uploaded)" +
                     (if (app.prefs.pendingDeletes.isNotEmpty()) ". Server delete pending, retried automatically." else "")
             }
+            lifecycleScope.launch {
+                val waiting = withContext(Dispatchers.IO) { app.corrections.readFrom(app.prefs.corrUploadOffset, 10_000, 4 shl 20).first.size }
+                findPreference<Preference>("upload_preview")?.summary =
+                    if (!app.prefs.share) "Sharing is off: nothing is queued" else "$waiting waiting to upload. Tap to see the last 20 queued events, exactly as they will be sent"
+            }
         }
+
+        /** the last ~20 queued upload events, verbatim (one JSON object each) */
+        private fun showUploadPreview() {
+            lifecycleScope.launch {
+                val lines = withContext(Dispatchers.IO) { app.corrections.tail(20) }
+                val text = if (lines.isEmpty()) {
+                    if (app.prefs.share) "Nothing queued yet. Each correction you make while sharing is on shows up here before it's sent."
+                    else "Sharing is off, so nothing is queued or sent."
+                } else lines.asReversed().joinToString("\n\n") { l ->
+                    runCatching { prettyJson.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), kotlinx.serialization.json.Json.parseToJsonElement(l)) }.getOrDefault(l)
+                }
+                val tv = android.widget.TextView(requireContext()).apply {
+                    setText(text); setTextIsSelectable(true); typeface = android.graphics.Typeface.MONOSPACE; textSize = 12f
+                    val p = (16 * resources.displayMetrics.density).toInt(); setPadding(p, p / 2, p, p / 2)
+                }
+                MaterialAlertDialogBuilder(requireContext()).setTitle("Upload preview (newest first)")
+                    .setView(android.widget.ScrollView(requireContext()).apply { addView(tv) })
+                    .setPositiveButton("Close", null).show()
+            }
+        }
+
+        private val prettyJson = kotlinx.serialization.json.Json { prettyPrint = true }
 
         private fun export() {
             lifecycleScope.launch {

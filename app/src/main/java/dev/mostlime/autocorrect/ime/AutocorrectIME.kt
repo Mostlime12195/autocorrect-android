@@ -256,7 +256,13 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     override fun onCreate() {
         super.onCreate()
         app = application as App
-        ctl = KeyboardController({ currentInputConnection?.let { editor } }, engine, ui, timer, learning) { e ->
+        // opt-in upload: scrubbed word-level events, queued only while sharing is on (DATA.md)
+        val corrections = dev.mostlime.autocorrect.log.CorrectionLog(
+            sink = { e -> if (app.prefs.share) app.corrections.append(toJson(e) as JsonObject) },
+            inVocab = learning::inVocab,
+            isProbation = { w -> app.user.onProbation(w) },
+        )
+        ctl = KeyboardController({ currentInputConnection?.let { editor } }, engine, ui, timer, learning, corrections) { e ->
             app.events.append(toJson(e) as JsonObject)
         }
         EngineHolder.preload(this)

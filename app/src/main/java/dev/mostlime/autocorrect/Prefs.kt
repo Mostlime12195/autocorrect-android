@@ -130,9 +130,10 @@ class Prefs(private val ctx: Context) {
         get() = sp.getInt(UPDATE_NOTIFIED, 0)
         set(v) = sp.edit().putInt(UPDATE_NOTIFIED, v).apply()
 
-    var uploadOffset: Long
-        get() = sp.getLong(UPLOAD_OFFSET, 0)
-        set(v) = sp.edit().putLong(UPLOAD_OFFSET, v).apply()
+    /** byte offset of the first not-yet-uploaded line of the upload queue (App.corrections) */
+    var corrUploadOffset: Long
+        get() = sp.getLong(CORR_UPLOAD_OFFSET, 0)
+        set(v) = sp.edit().putLong(CORR_UPLOAD_OFFSET, v).apply()
 
     val installId: String
         get() = sp.getString(INSTALL_ID, null) ?: UUID.randomUUID().toString().also { sp.edit().putString(INSTALL_ID, it).commit() }
@@ -179,7 +180,9 @@ class Prefs(private val ctx: Context) {
         const val WIFI_ONLY = "upload_wifi_only"
         const val UPLOAD_URL = "upload_url"
         const val MANIFEST_URL = "manifest_url"
+        /** the v1 uploader's cursor into the local log (removed at start) */
         const val UPLOAD_OFFSET = "upload_offset"
+        const val CORR_UPLOAD_OFFSET = "corr_upload_offset"
         const val INSTALL_ID = "install_id"
         const val PENDING_DELETES = "pending_deletes"
         const val THEME_MODE = "theme_mode"

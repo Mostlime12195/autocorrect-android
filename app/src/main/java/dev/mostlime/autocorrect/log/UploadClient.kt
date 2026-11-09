@@ -1,5 +1,9 @@
 package dev.mostlime.autocorrect.log
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.net.HttpURLConnection
 import java.net.URI
 
@@ -22,16 +26,16 @@ object UploadClient {
     }
 
     /**
-     * Upload envelope (docs/upload-schema.md). The events are the log's JSON lines as they are. installId is a UUID
-     * and appVersion is VERSION_NAME, so plain concatenation is safe; don't add free-text fields this way.
+     * Upload envelope (schema autocorrect-events/2: exactly schema, install_id, app_version, events). The events are
+     * the queue's JSON lines as they are (each one already scrubbed and checked by CorrectionLog).
      */
-    fun envelope(installId: String, appVersion: String, sentAt: Long, lines: List<String>): String = buildString {
-        append("{\"schema\":\"autocorrect-events/").append(EventLog.SCHEMA).append("\",")
-        append("\"install_id\":\"").append(installId).append("\",")
-        append("\"app_version\":\"").append(appVersion).append("\",")
-        append("\"sent_at\":").append(sentAt).append(",")
-        append("\"events\":[").append(lines.joinToString(",")).append("]}")
-    }
+    fun envelope(installId: String, appVersion: String, lines: List<String>): String =
+        JsonObject(mapOf(
+            "schema" to JsonPrimitive("autocorrect-events/${EventLog.SCHEMA}"),
+            "install_id" to JsonPrimitive(installId),
+            "app_version" to JsonPrimitive(appVersion),
+            "events" to JsonArray(lines.mapNotNull { runCatching { Json.parseToJsonElement(it) }.getOrNull() }),
+        )).toString()
 
     class Drained(val sent: Int, val skipped: Int, /** set when it stopped on a retryable error */ val retry: Response?)
 

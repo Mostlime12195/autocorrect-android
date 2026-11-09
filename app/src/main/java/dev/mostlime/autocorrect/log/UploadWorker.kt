@@ -21,10 +21,11 @@ import java.net.URI
 import java.util.concurrent.TimeUnit
 
 /**
- * Opt-in upload of the local event log ("Share typing data", off by default). Batched POST of new events since the
- * last successful upload, JSON body per docs/upload-schema.md. Runs via WorkManager every 6 hours, Wi-Fi only by
- * default. Pending server-side deletes ("Delete my uploaded data" that couldn't reach the server) go first, before any
- * upload, and also run when sharing is off.
+ * Opt-in upload of the correction queue ("Share correction data", off by default): batched POST of the scrubbed v2
+ * events queued since the last successful upload (App.corrections, schema in DATA.md / docs/upload-schema.md). The
+ * local event log is never uploaded. Runs via WorkManager every 6 hours, Wi-Fi only by default. Pending server-side
+ * deletes ("Delete my uploaded data" that couldn't reach the server) go first, before any upload, and also run when
+ * sharing is off.
  */
 class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -46,10 +47,10 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
 
         if (!prefs.share) return@withContext Result.success()
         if (URI(url).host?.endsWith(".invalid") != false) return@withContext Result.success()
-        val d = UploadClient.drain(prefs.uploadOffset, BATCH_EVENTS,
-            read = { from, n -> app.events.readFrom(from, n, BATCH_BYTES) },
-            send = { lines -> UploadClient.post(url, UploadClient.envelope(prefs.installId, BuildConfig.VERSION_NAME, System.currentTimeMillis(), lines)) },
-            commit = { prefs.uploadOffset = it },
+        val d = UploadClient.drain(prefs.corrUploadOffset, BATCH_EVENTS,
+            read = { from, n -> app.corrections.readFrom(from, n, BATCH_BYTES) },
+            send = { lines -> UploadClient.post(url, UploadClient.envelope(prefs.installId, BuildConfig.VERSION_NAME, lines)) },
+            commit = { prefs.corrUploadOffset = it },
             log = { Log.w(TAG, it) })
         Log.i(TAG, "uploaded ${d.sent} events, skipped ${d.skipped}")
         d.retry?.let { return@withContext retryLater(it, "upload") }
@@ -105,9 +106,10 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             prefs.pendingDeletes = prefs.pendingDeletes + old
             prefs.rotateInstallId()
             app.events.clear()
+            app.corrections.clear()
             app.user.clearAll()   // personal dictionary + learned edits are local data too
             Prefs.bgFile(app).delete(); prefs.bgStamp = 0L   // and the keyboard background image
-            prefs.uploadOffset = app.events.endOffset()
+            prefs.corrUploadOffset = app.corrections.endOffset()
             val r = UploadClient.delete(UploadClient.deleteUrl(prefs.uploadUrl, old))
             Log.i(TAG, "delete my data: ${r.code} ${r.body.take(200)}")
             return if (UploadClient.classify(r.code) == UploadClient.Action.ADVANCE) {

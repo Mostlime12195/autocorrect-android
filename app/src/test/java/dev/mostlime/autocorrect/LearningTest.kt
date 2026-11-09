@@ -99,12 +99,15 @@ class LearningTest {
     }
     private var session = "s1"
     private var nearCommon = false
+    /** upload events (autocorrect-events/2) */
+    private val uploads = ArrayList<Map<String, Any?>>()
+    private val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ uploads.add(it) }, learning::inVocab, { user.onProbation(it) })
     private val ctl = KeyboardController({ ed }, engine, object : ControllerUi {
         override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
         override fun setShift(shift: Shift) {}
         override fun onResult(r: WordResult?) {}
         override fun onDictAdded(word: String) { added.add(word) }
-    }, timer, learning) { events.add(it) }
+    }, timer, learning, corrections) { events.add(it) }
 
     private fun start(suggestOnly: Boolean = false, confidentOnly: Boolean = false) =
         ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "test" }, "t",
@@ -520,5 +523,94 @@ class LearningTest {
         val r = corrector.correctWord(dev.mostlime.autocorrect.engine.WordInput("fized", null, "it is", " "), lm, P, null)
         val gap = s.scores[s.chosen] - s.scores[s.slot.typedIdx]
         if (gap < UserData.SUPPRESS_NATS) assertEquals("fized", r.out) else assertEquals("fixed", r.out)
+    }
+
+    // ------------------------------------------------------------------ upload events through the real controller
+    private fun upload(typed: String) = uploads.single { it["typed"] == typed }
+
+    @Test fun uploadKeptAndUndone() {
+        start()
+        type("so i want teh quick brown fox ")
+        engine.deliver()
+        assertTrue(ed.text.toString(), ed.text.endsWith("want the quick brown fox "))
+        ctl.finishInput()
+        val e = upload("teh")
+        assertEquals("auto_applied_kept", e["outcome"]); assertEquals("the", e["suggestion"])
+        assertEquals(listOf("i", "want"), e["before"]); assertEquals(listOf("quick"), e["after"])
+        assertEquals("spelling", e["kind"])
+
+        uploads.clear(); ed.text.setLength(0); start()
+        type("fized ")
+        engine.deliver()
+        type("\b")                                        // backspace undo
+        type(" a lot ")                                    // finished as typed: a real undo
+        engine.deliver()
+        ctl.finishInput()
+        assertEquals("auto_applied_undone", upload("fized")["outcome"])
+        assertEquals(listOf("a"), upload("fized")["after"])
+    }
+
+    @Test fun uploadManualFixAndAccidentalBackspace() {
+        start()
+        type("fized ")
+        engine.deliver()
+        assertEquals("fixed ", ed.text.toString())
+        type("\b")                                        // undo -> "fized" composing
+        type("\b\b\bes ")                                  // retyped the slot as "fies"
+        engine.deliver()
+        ctl.finishInput()
+        val e = upload("fized")
+        assertEquals("manual_fix", e["outcome"]); assertEquals("fies", e["final"])
+
+        uploads.clear(); ed.text.setLength(0); start()
+        type("fized ")
+        engine.deliver()
+        type("\b")                                        // undo...
+        type("\b\b\b\b\bfixed ")                           // ...and typed the same fix again: accidental, nothing sent
+        engine.deliver()
+        ctl.finishInput()
+        assertTrue(uploads.toString(), uploads.none { it["typed"] == "fized" })
+    }
+
+    @Test fun uploadSuggestOnlyPickNotATypoAndIgnore() {
+        start(suggestOnly = true)
+        type("so i want teh quick brown ")
+        engine.deliver()
+        ctl.stripAction()                                  // the "teh -> the" chip
+        ctl.finishInput()
+        val e = upload("teh")
+        assertEquals("suggestion_picked", e["outcome"]); assertEquals(0, e["picked_rank"])
+
+        uploads.clear(); ed.text.setLength(0); start(suggestOnly = true)
+        type("fized a lot ")
+        engine.deliver(); timer.fireAll()
+        ctl.stripActionLongPress()                         // not a typo
+        ctl.finishInput()
+        assertEquals("not_a_typo", upload("fized")["outcome"])
+
+        uploads.clear(); ed.text.setLength(0); start(suggestOnly = true)
+        type("teh quick ")
+        engine.deliver()
+        ctl.finishInput()                                  // left alone until the field closed
+        assertEquals("suggestion_ignored", upload("teh")["outcome"])
+    }
+
+    @Test fun uploadNothingFromPasswordFieldsOrProbationWords() {
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD, 0), true, "standard", { "test" }, "t"))
+        type("teh quick fized ")
+        engine.deliver()
+        ctl.finishInput()
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, 0), true, "standard", { "test" }, "t"))
+        type("teh quick ")
+        engine.deliver()
+        ctl.finishInput()
+        assertTrue(uploads.toString(), uploads.isEmpty())
+
+        user.addProbation("Fized", "s0")
+        start(suggestOnly = true)
+        type("fized a lot ")
+        engine.deliver()
+        ctl.finishInput()
+        assertTrue(uploads.toString(), uploads.none { it["typed"] == "fized" })
     }
 }

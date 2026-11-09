@@ -18,6 +18,9 @@ class App : Application() {
         private set
     lateinit var events: EventLog
         private set
+    /** opt-in upload queue: scrubbed v2 correction events (written by the keyboard only while sharing is on) */
+    lateinit var corrections: EventLog
+        private set
     /** personal dictionary + learned edits (files/dict, shared by the keyboard and settings processes) */
     val user: UserData by lazy { UserData(File(filesDir, "dict/words.txt"), File(filesDir, "dict/learn.tsv")) }
 
@@ -27,6 +30,9 @@ class App : Application() {
         prefs = Prefs(this)
         store = ModelStore(this)
         events = EventLog(this)
+        corrections = EventLog(this, "upload", "corrections", EventLog.QUEUE_BYTES) { prefs.corrUploadOffset = 0 }
+        // the v1 uploader's cursor into the local log: unused since uploads moved to the v2 queue
+        if (prefs.sp.contains(Prefs.UPLOAD_OFFSET)) prefs.sp.edit().remove(Prefs.UPLOAD_OFFSET).apply()
         // the re-check / rewind setting is gone (always on): an old "off" must not linger
         if (prefs.sp.contains(Prefs.REWIND)) prefs.sp.edit().remove(Prefs.REWIND).apply()
         // the keyboard runs in ":ime"; background work is scheduled from the app process only

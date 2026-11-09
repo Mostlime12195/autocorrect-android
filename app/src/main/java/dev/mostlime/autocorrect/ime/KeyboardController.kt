@@ -14,6 +14,7 @@ import dev.mostlime.autocorrect.engine.SwipeResult
 import dev.mostlime.autocorrect.engine.Touch
 import dev.mostlime.autocorrect.engine.WordInput
 import dev.mostlime.autocorrect.engine.WordResult
+import dev.mostlime.autocorrect.log.CorrectionLog
 import java.util.UUID
 
 /** The text field, as the controller sees it (InputConnection in the app, a fake in tests). All calls are synchronous. */
@@ -165,6 +166,8 @@ class KeyboardController(
     private val ui: ControllerUi,
     private val timer: Timer,
     private val learning: Learning = object : Learning {},
+    /** opt-in upload events (word-level, scrubbed): fed from write() plus the hooks below; never for sensitive fields */
+    private val corrections: CorrectionLog? = null,
     private val events: (Map<String, Any?>) -> Unit,
 ) {
     var config = ControllerConfig(FieldPolicy.NONE, false, "standard", { "none" }, "")
@@ -305,6 +308,7 @@ class KeyboardController(
     // ------------------------------------------------------------------ input lifecycle
     fun startInput(cfg: ControllerConfig) {
         flushLast()
+        corrections?.flush()
         config = cfg
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
         typo = null; dictAdded = null; pendingUndo = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
@@ -321,6 +325,7 @@ class KeyboardController(
 
     fun finishInput() {
         flushLast()
+        corrections?.flush()
         pendings.filter { it.uncommitted }.forEach { commitHeld(it) }
         releaseHold()
         pendings.clear()
@@ -334,6 +339,7 @@ class KeyboardController(
         if (ed.hasSelection() || !ed.textBefore(composing.length + 1).endsWith(composing)) {
             ed.finishComposing()
             invalidatePendings()
+            corr()?.let { c -> pendingUndo?.let { c.undoResolved(it.ev?.get("id") as? String, null) }; c.breakChain() }
             resetWord(); last = null; prev = null; typo = null; pendingUndo = null
             setStrip(emptyList(), -1, StripMode.NONE)
         }
@@ -380,6 +386,7 @@ class KeyboardController(
             KeyType.SPACE -> if (composing.isNotEmpty()) finishWord(ed, " ", trigger = true) else { flushLast(); ed.commit(" "); autoShift() }
             KeyType.ENTER -> {
                 if (composing.isNotEmpty()) finishWord(ed, "", trigger = true)
+                corr()?.breakChain()
                 if (pendings.any { it.valid }) {
                     // hold enter (and later keys) until the corrections land or the hold times out
                     holding = true
@@ -409,6 +416,7 @@ class KeyboardController(
         flushLast(); cancelSuggest()
         if (composing.isNotEmpty()) { ed.commit(composing.toString()); resetWord() }
         invalidatePendings(); prev = null; last = null; typo = null
+        corr()?.breakChain()
         ed.moveCursor(dir)
         setStrip(emptyList(), -1, StripMode.NONE)
         autoShift()
@@ -451,6 +459,7 @@ class KeyboardController(
                 ed.endBatch()
                 keepTypedOnce = true
                 l.event?.let { it["outcome"] = "undone"; it["final"] = l.typed; write(it) }
+                corr()?.reopen()   // the same word slot is finished again (its verdict: undoResolved)
                 last = null; prev = null
                 setStrip(emptyList(), -1, StripMode.NONE)
                 // learned from only if the word as typed then stays (see PendingUndo)
@@ -460,6 +469,7 @@ class KeyboardController(
         }
         flushLast()
         ed.deleteKey()
+        corr()?.breakChain()
         setStrip(emptyList(), -1, StripMode.NONE)
         autoShift()
     }
@@ -470,12 +480,14 @@ class KeyboardController(
         pendingUndo?.let { pu ->
             pendingUndo = null
             val now = composing.toString()
+            corr()?.undoResolved(pu.ev?.get("id") as? String, now)
             if (now == pu.word) learnFromUndo(pu.full, pu.out, pu.ev, pu.gap)
             // now == pu.out (retyped the fix) or something else: not a rejection, nothing learned
         }
         composing.toString().takeIf { it.isNotEmpty() && learning.isUserWord(it) }?.let { learning.seenTyped(it) }
         cancelSuggest()
         val typed = composing.toString()
+        if (typed.isNotEmpty()) corr()?.word(typed)
         val tch = ArrayList(touches)
         val cfg = config
         val canCorrect = trigger && cfg.policy.autocorrect && cfg.autocorrect && WORD_RE.matches(typed) && !keepTypedOnce
@@ -961,6 +973,7 @@ class KeyboardController(
                 flushLast()
                 ed.commit("$pick ")
                 resetWord()
+                corr()?.word(pick)
                 if (!config.policy.sensitive) {
                     val e = baseEvent("strip_pick", typed, tch)
                     e["candidates"] = shown.map { mapOf("w" to it) }
@@ -981,7 +994,7 @@ class KeyboardController(
                 ed.commit(pick + l.sepText)
                 ed.endBatch()
                 val e = l.event ?: if (!config.policy.sensitive && l.result != null) baseEvent("autocorrect", l.typed, l.touches) else null
-                e?.let { it["outcome"] = if (pick == l.typed) "undone" else "strip_pick"; it["final"] = pick; write(it) }
+                e?.let { it["outcome"] = if (pick == l.typed) "undone" else "strip_pick"; if (pick == l.typed) it["via"] = "pick"; it["final"] = pick; write(it) }
                 // a swiped word stays removable with one backspace after a pick from its alternates
                 last = if (l.swiped) Last("", emptyList(), pick, l.sepText, null, null, "", l.lead) else null
                 if (pick == l.typed && l.result != null && !l.swiped) learnFromUndo(l.undoPrefix + l.typed, l.out, l.event)
@@ -1108,7 +1121,7 @@ class KeyboardController(
         if (spelling) {
             learning.addWord(typed)
             if (!config.policy.sensitive) write(linkedMapOf("v" to 1, "id" to UUID.randomUUID().toString(), "ts" to System.currentTimeMillis(),
-                "type" to "not_typo", "typed" to typed, "left_context" to left, "candidates" to fixes.take(3).map { mapOf("w" to it) },
+                "type" to "not_typo", "typed" to typed, "left_context" to left, "candidates" to fixes.take(3).map { mapOf("w" to it) }, "ref" to ev?.get("id"),
                 "style" to config.style, "model" to config.modelId(), "app_version" to config.appVersion))
         } else {
             fixes.firstOrNull()?.let { suppressEdit(typed, it, "ignore", ev) }
@@ -1302,7 +1315,7 @@ class KeyboardController(
         learning.suppress(typed, chosen)
         if (!config.policy.sensitive) write(linkedMapOf("v" to 1, "id" to UUID.randomUUID().toString(), "ts" to System.currentTimeMillis(),
             "type" to "suppress", "typed" to typed, "chosen" to chosen, "source" to source,
-            "left_context" to (ev?.get("left_context") as? String), "style" to config.style, "model" to config.modelId(), "app_version" to config.appVersion))
+            "left_context" to (ev?.get("left_context") as? String), "ref" to ev?.get("id"), "style" to config.style, "model" to config.modelId(), "app_version" to config.appVersion))
     }
 
     /** Replace a word that ends `pos - (start + old.length)` chars before the cursor, if the text there is unchanged. */
@@ -1407,6 +1420,7 @@ class KeyboardController(
             if (ed.hasSelection()) return
             val out = capI(word)
             ed.commit(lead + out + " ")
+            corr()?.word(out)
             val geo = r.geoBest?.let(::capI)
             val strip = r.ranked(3).map(::capI).distinct().toMutableList()
             // the geometry-only word, when the LM overruled it, is the undo chip (like the word as typed after a correction)
@@ -1472,7 +1486,11 @@ class KeyboardController(
     private fun write(e: Map<String, Any?>) {
         if (config.policy.sensitive) return
         events(e)
+        corrections?.onEvent(e)
     }
+
+    /** the upload log, unless this field is sensitive (password / email / URL / number / incognito ...) */
+    private fun corr(): CorrectionLog? = corrections?.takeIf { !config.policy.sensitive }
 
     private fun baseEvent(type: String, typed: String, tch: List<Touch>): MutableMap<String, Any?> = linkedMapOf(
         "v" to 1, "id" to UUID.randomUUID().toString(), "ts" to System.currentTimeMillis(), "type" to type,
