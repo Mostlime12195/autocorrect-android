@@ -411,7 +411,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     }
 
     /** Settings.Secure navigation_mode == 2 (gesture navigation), set by the keyboard service */
-    var gestureNav = true
+    var gestureNav = false
+        set(v) { if (v != field) { field = v; post { fixBottomInset() } } }
 
     /** tests: insets as a phone would report them */
     @androidx.annotation.VisibleForTesting
@@ -438,11 +439,12 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         }.getOrNull()
     }
 
-    /** after layout: pad only for the part of the bar that actually overlaps us */
+    /** after layout: pad for the part of the bar that actually overlaps us (+ room for the gesture zone) */
     private fun fixBottomInset() {
         if (fixedInsets) return
         val o = screenOverlap() ?: return
-        if (o != bottomInset) { bottomInset = o; requestLayout() }
+        val p = paddingFor(o, gestureBottom, gestureNav, dp)
+        if (p != bottomInset) { bottomInset = p; requestLayout() }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
@@ -463,7 +465,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         if (fixedInsets) return insets
         gestureBottom = gestureBottomOf(insets)
         // a first guess from the insets dispatched to this view; corrected from the on-screen overlap after layout
-        val b = screenOverlap() ?: bottomOf(insets)
+        val b = paddingFor(screenOverlap() ?: bottomOf(insets), gestureBottom, gestureNav, dp)
         if (b != bottomInset) { bottomInset = b; requestLayout() }
         return insets
     }
@@ -973,6 +975,17 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     companion object {
         const val REPEAT_START_MS = 400L
         const val LONG_PRESS_MS = 500L
+        /**
+         * Bottom padding under the keys: the nav bar's real overlap with our window, and with gesture navigation up to
+         * GESTURE_CLEARANCE_DP more when the system's gesture zone is taller (Infinix / XOS: 16 dp bar, 40 dp zone, the
+         * swipe-up zone sat on the bottom row). 3-button navigation: just the overlap (0 on Samsung: no gap).
+         */
+        fun paddingFor(overlap: Int, gestureBottom: Int, gestureNav: Boolean, dp: Float): Int {
+            if (!gestureNav || gestureBottom <= overlap) return overlap
+            return overlap + minOf(gestureBottom - overlap, (GESTURE_CLEARANCE_DP * dp).toInt())
+        }
+        const val GESTURE_CLEARANCE_DP = 12
+
         /** dead band at the bottom for touch downs: only where the gesture band overlaps our own bottom padding */
         fun deadBand(gestureBottom: Int, bottomInset: Int) = minOf(gestureBottom, bottomInset).coerceAtLeast(0)
         const val LONG_PRESS_ALT_MS = 380L

@@ -62,6 +62,18 @@ class LayoutTest {
         assertTrue(dev.mostlime.autocorrect.ime.KeyboardView.deadBand(0, 63) == 0)
     }
 
+    /** padding under the keys from real diagnostics */
+    @Test fun bottomPaddingFromDiagnostics() {
+        val kv = dev.mostlime.autocorrect.ime.KeyboardView
+        // Infinix X6861 (XOS, Android 15, gesture nav, dp 3.0): nav bar overlap 48 px, gesture zone 120 px -> 12 dp more
+        assertTrue(kv.paddingFor(48, 120, true, 3f) == 84)
+        assertTrue(kv.deadBand(120, kv.paddingFor(48, 120, true, 3f)) == 84)
+        // Samsung 3-button (window above the bar): no gap, no band
+        assertTrue(kv.paddingFor(0, 144, false, 2.625f) == 0)
+        // gesture zone no taller than the bar: just the bar
+        assertTrue(kv.paddingFor(63, 63, true, 2.625f) == 63)
+    }
+
     @Test fun numberRowKeepsLetterTouchesInModelUnits() {
         val l = KeyboardLayout.LETTERS_NUM
         val q = l.keys.first { it.text == "q" }

@@ -82,6 +82,23 @@ class BottomRowTouchTest {
         }
     }
 
+    /** lime's Infinix (gesture nav, dp 3): overlap 48 px, gesture zone 120 px -> 84 px padding; keys type, swipe-up doesn't */
+    @Test fun infinixGestureZoneStaysOffTheKeys() {
+        inst.runOnMainSync {
+            val pad = KeyboardView.paddingFor(48, 120, true, 3f)
+            val (v, r) = view(120, pad, gestureNav = true)
+            val y = bottomRowY(v)
+            tap(v, v.width * 0.5f, y)
+            tap(v, v.width * 0.80f, y)
+            assertEquals(listOf(KeyType.SPACE, KeyType.CHAR), r.keys)
+            val t = SystemClock.uptimeMillis()
+            ev(v, MotionEvent.ACTION_DOWN, v.width * 0.5f, v.height - 10f, t)
+            ev(v, MotionEvent.ACTION_MOVE, v.width * 0.5f, -20f, t)
+            ev(v, MotionEvent.ACTION_UP, v.width * 0.5f, -20f, t)
+            assertEquals(listOf(KeyType.SPACE, KeyType.CHAR), r.keys)
+        }
+    }
+
     @Test fun longPressSpaceOpensThePickerAndDragCancelsIt() {
         lateinit var v: KeyboardView
         val switched = java.util.concurrent.atomic.AtomicInteger()
