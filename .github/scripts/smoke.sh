@@ -143,7 +143,8 @@ MODEL1=$(adb logcat -d | grep -o "AcEngine: session [a-z0-9_]* ready" | tail -1 
 measure "${MODEL1:-model}"
 # switch off the Lite model -> m2 (downloads ~80 MB), then measure again
 adb shell input keyevent KEYCODE_BACK; sleep 1
-adb shell am start -n dev.mostlime.autocorrect/.ui.SettingsActivity >/dev/null; sleep 3
+# a fresh settings activity on its main screen (the earlier phase left it in a sub-screen)
+adb shell am start -S -n dev.mostlime.autocorrect/.ui.SettingsActivity >/dev/null; sleep 5
 if tap_text "Model" && sleep 2 && tap_text "Lite model"; then
   for i in $(seq 1 30); do
     adb logcat -d | grep -q "AcEngine: session m2s_int4 ready" && break
