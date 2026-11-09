@@ -107,8 +107,10 @@ A **token** is allowed only if it is 1-20 characters, has at least one letter, a
 marks, `'`, `’`, `-` and `.`. So anything with a digit, `@`, `://`, a space, a slash or other symbols is not a token.
 
 1. **Field check.** Nothing is recorded in password (all variants), email, URL, number, phone, date/time, raw or
-   incognito (`IME_FLAG_NO_PERSONALIZED_LEARNING`) fields on Android, or secure / password / email / URL / number
-   fields on Mac. Such a decision never becomes an event.
+   incognito (`IME_FLAG_NO_PERSONALIZED_LEARNING`) fields on Android. On Mac: nothing in secure (password) fields,
+   while secure input is on, or in excluded apps (terminals, editors and password managers by default); the Mac
+   can't tell email / URL / number fields apart, but the token rule below still drops emails, links and numbers.
+   Such a decision never becomes an event.
 2. **The word itself.** If `typed` isn't a single allowed token, or `suggestion` / `final` aren't one or two allowed
    tokens, the whole event is dropped.
 3. **Alternatives.** Each alternative that fails the token rule is left out (its rank is kept, so ranks may skip).
@@ -133,7 +135,7 @@ The server re-checks rules 2-4 (tokens, lowercase context, lengths, counts) and 
   over ssh with `admin.py`.
 - Kept until the install deletes it ("Delete my uploaded data" → `DELETE /api/v1/install/{id}`) or the maintainer
   deletes it. There is no automatic expiry yet.
-- On the device: the queue (`filesDir/upload/corrections.jsonl` on Android, `~/Library/Application Support/Keylime/upload/corrections.jsonl`
+- On the device: the queue (`filesDir/upload/corrections.jsonl` on Android, `~/Library/Application Support/Autocorrect/upload/corrections.jsonl`
   on Mac) holds only scrubbed v2 events, is trimmed after upload, capped in size, and cleared by "Delete my uploaded
   data" or by turning sharing off.
 - The old v1 schema (`autocorrect-events/1`: 120 characters of context, touch points, candidate scores) is retired:
