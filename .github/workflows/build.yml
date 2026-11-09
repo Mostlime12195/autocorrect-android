@@ -96,7 +96,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           case "$GITHUB_REF" in refs/tags/*) ;; *) TAG="v${{ steps.apk.outputs.version }}" ;; esac
-          gh release create "$TAG" "${{ steps.apk.outputs.file }}" --target "$GITHUB_SHA" --title "Autocorrect $TAG" \
+          gh release create "$TAG" "${{ steps.apk.outputs.file }}" --target "$GITHUB_SHA" --title "Keylime $TAG" \
             --notes "Signed APK built from ${GITHUB_SHA::7}. Install over any earlier build (same signing key)." --latest
 
   smoke:

@@ -1,5 +1,8 @@
 # Keylime keyboard (Android)
 
+**Install:** grab the APK from the [latest release](https://github.com/Mostlime12195/autocorrect-android/releases/latest)
+(arm64, Android 8+), open it, then enable Keylime in Settings → System → Keyboard. It updates itself from then on.
+
 A QWERTY keyboard (Android `InputMethodService`) whose autocorrect is the tiny on-device language model from the
 `autocorrect` project. It is a Kotlin port of the browser demo's pipeline (candidate generation → LM re-ranking →
 re-check of the previous word) on onnxruntime-android, fed with **real touch coordinates** instead of key centres.
@@ -93,8 +96,7 @@ In the Autocorrect app:
 ## Models and download
 
 Models are not in the APK or in this repo. They are release assets of the public repo
-[Mostlime12195/autocorrect-models](https://github.com/Mostlime12195/autocorrect-models) (tag `models-v1`; this repo is
-private, so its own release assets would need a token). On first run the app fetches that release's `manifest.json`
+[Mostlime12195/autocorrect-models](https://github.com/Mostlime12195/autocorrect-models) (tag `models-v1`). On first run the app fetches that release's `manifest.json`
 (fallback: `https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json`), which lists each model's files
 with size and SHA-256 and the mirrors to download from, and downloads the active model's files into app-private storage
 with WorkManager (progress in settings). A file is used only after its SHA-256 matches. A copy of the manifest is
