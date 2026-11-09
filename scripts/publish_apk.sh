@@ -28,6 +28,7 @@ if [ -n "$PREV" ]; then
   NOTES=$(gh api "repos/$REPO/compare/$PREV...$TAG" --jq '.commits[].commit.message | split("\n")[0]' | sed 's/ *\[skip ci\]//g' \
     | grep -v -E '^(README|Merge|MIT license|Smoke test|Tests:)' | paste -sd ';' | sed 's/;/; /g')
 fi
+[ -z "${NOTES_OVERRIDE:-}" ] || NOTES="$NOTES_OVERRIDE"   # e.g. when a commit in the range was superseded
 [ -n "${NOTES:-}" ] || NOTES=$(gh api "repos/$REPO/commits/$COMMIT" --jq .commit.message | head -1 | sed 's/ *\[skip ci\]//g')
 
 if gh release view "app-v$V" -R "$PUB" >/dev/null 2>&1; then
