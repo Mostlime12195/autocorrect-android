@@ -607,8 +607,11 @@ class KeyboardController(
                 sentenceCache[key] = fixes
                 if (cp >= 0) {
                     val s0 = cp - before.length + r.first
-                    flags.removeAll { it.start >= s0 && it.start < s0 + (r.last - r.first + 1) }
-                    for (fx in fixes) addFlag(Flag(s0 + fx.start, fx.from, fx.fixes, isSpellingEdit(fx.from, fx.to), null,
+                    val old = flags.filter { it.start >= s0 && it.start < s0 + (r.last - r.first + 1) }
+                    flags.removeAll(old.toSet())
+                    // a word flagged as it was typed keeps its event (so a later fix / "not a typo" is logged against it)
+                    for (fx in fixes) addFlag(Flag(s0 + fx.start, fx.from, fx.fixes, isSpellingEdit(fx.from, fx.to),
+                        old.firstOrNull { it.start == s0 + fx.start && it.word == fx.from }?.event,
                         (left + text.substring(r.first, r.first + fx.start)).takeLast(LOG_CONTEXT_CHARS)))
                 }
                 if (!spansDropped) e2.remark(r.first - before.length, text.substring(r), fixes.map { TypoMark(it.start, it.from.length, it.fixes) })
@@ -977,7 +980,7 @@ class KeyboardController(
         cursorFlag?.let { f ->
             cursorFlag = null
             // same text, without the mark (nothing to rewrite where marks never stuck or weren't attached)
-            val ok = if (spansDropped || f !in marked) { flags.remove(f); true } else replaceFlag(ed, f, f.word)
+            val ok = if (spansDropped) { flags.remove(f); true } else replaceFlag(ed, f, f.word)
             if (ok) {
                 // the same word may also be the typing-time flag
                 typo?.let { t -> if (t.typed == f.word) typo = null }
