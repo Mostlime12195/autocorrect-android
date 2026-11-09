@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- in-app updates: install the downloaded APK (Android asks the user), and tell them one is available -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: once this app installed the current version itself, updates install without the confirmation
+         (setRequireUserAction(USER_ACTION_NOT_REQUIRED)); otherwise STATUS_PENDING_USER_ACTION shows it as before -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
