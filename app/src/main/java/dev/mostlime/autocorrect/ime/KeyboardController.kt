@@ -237,7 +237,7 @@ class KeyboardController(
     private val held = ArrayList<() -> Unit>()
     private var holdToken: Any? = null
 
-    enum class StripMode { NONE, TYPING, LAST_WORD, REWIND, TYPO, DICT_ADDED, FLAG }
+    enum class StripMode { NONE, TYPING, LAST_WORD, REWIND, TYPO, DICT_ADDED, FLAG, WORD_ALTS }
 
     /** the most recent word marked as a likely typo (start = its position in the counter) */
     private class Typo(val start: Long, val typed: String, val fixes: List<String>, val spelling: Boolean,
@@ -425,7 +425,7 @@ class KeyboardController(
         if (composing.isNotEmpty()) {
             composing.deleteCharAt(composing.length - 1)
             if (touches.isNotEmpty()) touches.removeAt(touches.size - 1)
-            if (composing.isEmpty()) { ed.commit(""); setStrip(emptyList(), -1, StripMode.NONE) } else { ed.setComposing(composing.toString()); scheduleSuggest() }
+            if (composing.isEmpty()) { ed.commit(""); setStrip(emptyList(), -1, StripMode.NONE); flushDeferred() } else { ed.setComposing(composing.toString()); scheduleSuggest() }
             return
         }
         val l = last
@@ -483,7 +483,7 @@ class KeyboardController(
         if (!canCorrect || !raw.endsWith(typed)) {
             ed.commit(typed + sepText)
             resetWord()
-            prev = null; autoShift(); setStrip(emptyList(), -1, StripMode.NONE); showTypo(); return
+            prev = null; autoShift(); setStrip(emptyList(), -1, StripMode.NONE); showTypo(); flushDeferred(); return
         }
         // the word stays as typed (composing) for up to FAST_HOLD_MS: a quick result (cheap path, skip, contractions,
         // a fast model) is then committed directly, in one edit, so the text never shows typed -> corrected.
@@ -530,7 +530,7 @@ class KeyboardController(
 
     /** results that waited for a held word: run them now (never from inside another edit) */
     private fun flushDeferred() {
-        if (deferred.isEmpty() || pendings.any { it.uncommitted }) return
+        if (deferred.isEmpty() || pendings.any { it.uncommitted } || composing.isNotEmpty()) return
         val todo = ArrayList(deferred); deferred.clear()
         for ((p, r) in todo) onCorrection(p, r)
     }
@@ -540,7 +540,9 @@ class KeyboardController(
 
     private fun onCorrection(pd: Pending, r: WordResult?) {
         if (pd.done) return
-        if (!pd.uncommitted && pendings.any { it.uncommitted }) { deferred.add(pd to r); return }
+        // a late result for an earlier word waits while a word is being typed (composing or held): it's applied at the
+        // next separator / pause, re-validated against the text, so the word at the cursor is never split or uncomposed
+        if (!pd.uncommitted && (pendings.any { it.uncommitted } || composing.isNotEmpty())) { deferred.add(pd to r); return }
         pd.done = true
         pendings.remove(pd)
         try {
@@ -598,6 +600,7 @@ class KeyboardController(
 
     /** 1.5 s without typing: attach underlines (word flags + what the re-check found) */
     private fun onQuiet() {
+        flushDeferred()
         if (holding || pendings.isNotEmpty() || composing.isNotEmpty()) return
         if (!config.policy.autocorrect || !config.autocorrect) return
         markIdle()
@@ -633,7 +636,7 @@ class KeyboardController(
      * word, cursor put back). Never while typing, never on cursor moves, and not at all in a field that drops spans.
      */
     private fun markIdle() {
-        if (spansDropped || !config.flagTypos) return
+        if (spansDropped || flags.isEmpty()) return
         val ed = ed() ?: return
         if (ed.hasSelection()) return
         val cur = ed.cursorPos().takeIf { it >= 0 } ?: return
@@ -795,7 +798,8 @@ class KeyboardController(
     }
 
     private fun applyRewind(snap: String, end: Long, changes: List<RewindChange>) {
-        if (changes.isEmpty() || holding || pendings.isNotEmpty()) return
+        // never while a word is being typed (tried again after the next word's result)
+        if (changes.isEmpty() || holding || pendings.isNotEmpty() || composing.isNotEmpty()) return
         val ed = ed() ?: return
         val cur = composing.toString()
         val first = changes.minOf { it.start }
@@ -883,8 +887,13 @@ class KeyboardController(
         val ev = if (!config.policy.sensitive) buildEvent(pd, r) else null
         // suggest-only, or an unsure correction with "only auto-correct when confident": mark, never edit
         val unsure = config.confidentOnly && r.out != pd.typed && mg == null && r.margin < CONFIDENT_MARGIN
-        if (config.suggestOnly || unsure) {
-            if (flag(pd, r, ev, if (config.suggestOnly) "suggest" else "unsure")) return
+        // a short word that needs 2+ letters changed ("wruff" -> "stuff") is often slang: underline, don't replace,
+        // unless the model is very sure
+        // (transpositions count as one: "teh" / "hte" are ordinary typos; real words are left to the other rules)
+        val risky = !config.suggestOnly && r.out != pd.typed && mg == null && pd.typed.length <= 5 && !learning.inVocab(pd.typed) &&
+            osaDistance(pd.typed.lowercase(), r.out.lowercase()) >= 2 && gapOf(r) < RISKY_APPLY_GAP
+        if (config.suggestOnly || unsure || risky) {
+            if (flag(pd, r, ev, if (config.suggestOnly) "suggest" else if (risky) "risky" else "unsure", force = risky)) return
             stats.unchanged++
             if (ev != null) writePerf(r)
             return
@@ -922,6 +931,7 @@ class KeyboardController(
         val delta = pos - before
         for (o in pendings) if (o.anchor > pd.anchor) o.anchor += delta
         stats.applied++
+        if (out != pd.typed) { recentFixes.addLast(pd.typed to out); while (recentFixes.size > 20) recentFixes.removeFirst() }
         ui.onApplied()
         if (rc != null) ev?.set("recheck", mapOf("from" to rc.from, "to" to rc.to))
         if (prevNew != null && rc?.to != prevNew) ev?.set("punct", mapOf("from" to pd.prevOut, "to" to prevNew))
@@ -996,6 +1006,15 @@ class KeyboardController(
                 if (replaceAt(ed, t.start, t.typed, pick)) {
                     t.event?.let { val e = LinkedHashMap(it); e["outcome"] = "strip_pick"; e["final"] = pick; e["ts"] = System.currentTimeMillis(); write(e) }
                 }
+                setStrip(emptyList(), -1, StripMode.NONE)
+            }
+            StripMode.WORD_ALTS -> {
+                // swap the tapped word, if it's still there around the cursor
+                val tw = tapWord ?: return
+                tapWord = null
+                val before = ed.textBefore(tw.back)
+                val after = ed.textAfter(tw.word.length - tw.back)
+                if (before + after == tw.word && !ed.hasSelection()) ed.replaceRange(-tw.back, tw.word.length, pick)
                 setStrip(emptyList(), -1, StripMode.NONE)
             }
             StripMode.DICT_ADDED, StripMode.NONE, StripMode.FLAG -> {}
@@ -1099,19 +1118,53 @@ class KeyboardController(
      * app, also those that ignore SuggestionSpans).
      */
     fun cursorMoved(selStart: Int, selEnd: Int) {
-        if (!config.suggestOnly) return   // auto-correct mode shows no typo chips
+        if (!config.suggestOnly || flags.isEmpty() || !onFlag(selStart, selEnd)) wordAlternatives(selStart, selEnd)
+    }
+
+    /** words changed recently (typed -> out): tapping one offers the word as typed first */
+    private val recentFixes = ArrayDeque<Pair<String, String>>()
+    private class TapWord(val word: String, val back: Int)
+    private var tapWord: TapWord? = null
+
+    /**
+     * The cursor was put on (or right next to) a word, typed or corrected: its alternatives go in the strip, a tap swaps
+     * them in (like Gboard). Works in every app; nothing changes until the user picks.
+     */
+    private fun wordAlternatives(selStart: Int, selEnd: Int) {
+        fun clear() { tapWord = null; if (stripMode == StripMode.WORD_ALTS) setStrip(emptyList(), -1, StripMode.NONE) }
+        if (holding || composing.isNotEmpty() || selStart != selEnd || !config.policy.suggestions || !config.autocorrect) { clear(); return }
+        val ed = ed() ?: return
+        val before = ed.textBefore(48); val after = ed.textAfter(48)
+        val wb = Regex("[A-Za-z']+$").find(before)?.value.orEmpty()
+        val wa = Regex("^[A-Za-z']+").find(after)?.value.orEmpty()
+        val word = (wb + wa).trim('\'')
+        if (word.length < 2 || !WORD_RE.matches(word) || (wb.isEmpty() && wa.isEmpty())) { clear(); return }
+        if (tapWord?.word == word && tapWord?.back == wb.length && stripMode == StripMode.WORD_ALTS) return
+        val tw = TapWord(word, wb.length)
+        tapWord = tw
+        val typed = recentFixes.lastOrNull { it.second == word }?.first
+        engine.suggest(word, dev.mostlime.autocorrect.engine.KeyGeom.keyTouches(word)) { s ->
+            if (tapWord !== tw || composing.isNotEmpty()) return@suggest
+            val list = (listOfNotNull(typed) + s).filter { it != word }.distinct().take(3)
+            if (list.isNotEmpty()) setStrip(list, 0, StripMode.WORD_ALTS)
+        }
+    }
+
+    /** suggest-only: the cursor on a flagged word -> its fixes (true = handled) */
+    private fun onFlag(selStart: Int, selEnd: Int): Boolean {
         if (holding || composing.isNotEmpty() || selStart != selEnd || selStart < 0 || flags.isEmpty()) {
             if (cursorFlag != null && selStart != selEnd) { cursorFlag = null; if (stripMode == StripMode.TYPO) setStrip(emptyList(), -1, StripMode.NONE) }
-            return
+            return false
         }
-        val ed = ed() ?: return
+        val ed = ed() ?: return false
         val f = flags.lastOrNull { selStart >= it.start && selStart <= it.start + it.word.length }
         if (f == null || !locate(ed, f, ed.cursorPos().takeIf { it >= 0 } ?: selStart)) {
             if (cursorFlag != null) { cursorFlag = null; if (stripMode == StripMode.TYPO) setStrip(emptyList(), -1, StripMode.NONE) }
-            return
+            return false
         }
         cursorFlag = f
         setStrip(f.fixes, 0, StripMode.TYPO, hint = "typo?", action = "not a typo")
+        return true
     }
 
     /** is f.word still at f.start (cursor at cur)? else look for it nearby and move the flag; false = gone */
@@ -1150,11 +1203,11 @@ class KeyboardController(
      * by FLAG_MARGIN. The text stays exactly as typed; the flag goes in the side chip now and gets its underline after a
      * pause (markIdle). -> false if nothing was flagged.
      */
-    private fun flag(pd: Pending, r: WordResult, ev: MutableMap<String, Any?>?, why: String): Boolean {
+    private fun flag(pd: Pending, r: WordResult, ev: MutableMap<String, Any?>?, why: String, force: Boolean = false): Boolean {
         val ti = r.slot.typedIdx
         val gap = if (ti < 0) Double.POSITIVE_INFINITY else r.scores[r.chosen] - r.scores[ti]
         val fixes = r.ranked(5).filter { it.lowercase() != pd.typed.lowercase() }.take(3)
-        if (!config.flagTypos || r.out == pd.typed || gap < FLAG_MARGIN || fixes.isEmpty() || learning.isUserWord(pd.typed)) return false
+        if ((!config.flagTypos && !force) || r.out == pd.typed || gap < FLAG_MARGIN || fixes.isEmpty() || learning.isUserWord(pd.typed)) return false
         val ed = ed() ?: return false
         val cur = composing.toString()
         val core = pd.typed + pd.sepText
@@ -1474,10 +1527,25 @@ class KeyboardController(
         /** "only auto-correct when confident": the choice must beat every other candidate by this much (WordResult.margin) */
         const val CONFIDENT_MARGIN = 3.0
         const val UNDOS_TO_ADD = 2
+        /** a short word needing 2+ letters changed is applied only above this gap over the word as typed */
+        const val RISKY_APPLY_GAP = 9.0
         /** the model "strongly prefers" its fix above this gap (score units) */
         const val STRONG_GAP = 4.0
 
         fun r3(x: Double) = Math.round(x * 1000.0) / 1000.0
+
+        /** edit distance where swapping two neighbouring letters counts as one edit (optimal string alignment) */
+        fun osaDistance(a: String, b: String): Int {
+            val d = Array(a.length + 1) { IntArray(b.length + 1) }
+            for (i in 0..a.length) d[i][0] = i
+            for (j in 0..b.length) d[0][j] = j
+            for (i in 1..a.length) for (j in 1..b.length) {
+                val c = if (a[i - 1] == b[j - 1]) 0 else 1
+                d[i][j] = minOf(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c)
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) d[i][j] = minOf(d[i][j], d[i - 2][j - 2] + 1)
+            }
+            return d[a.length][b.length]
+        }
 
         /** -> (left context = text up to the end of the previous word, separator before the current word) */
         fun splitLeft(before: String): Pair<String, String> {

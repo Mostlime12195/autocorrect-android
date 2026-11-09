@@ -397,11 +397,58 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
      * Never more than bottomInset, so keys keep their whole hit area (3-button nav / Samsung non-edge-to-edge IME windows
      * report a ~48 dp gesture inset with no padding of ours under the keys; using it raw killed the bottom row).
      */
-    private val deadBottom get() = deadBand(gestureBottom, bottomInset)
+    private val deadBottom: Int get() {
+        if (!gestureNav) return 0                      // 3-button / 2-button navigation: no swipe-up gesture to protect
+        val keysBottom = stripH + layer.rows * rh
+        return minOf(deadBand(gestureBottom, bottomInset), maxOf(0, (height - keysBottom).toInt()))   // never on a key
+    }
+
+    private var spacePointer = -1
+    private var spaceDownX = 0f
+    private var spaceLongDone = false
+    private val spaceLongPress = Runnable {
+        if (spacePointer >= 0 && pressed[spacePointer]?.type == KeyType.SPACE) { spaceLongDone = true; buzz(strong = true); listener.onSwitchIme() }
+    }
+
+    /** Settings.Secure navigation_mode == 2 (gesture navigation), set by the keyboard service */
+    var gestureNav = true
 
     /** tests: insets as a phone would report them */
     @androidx.annotation.VisibleForTesting
-    fun setInsetsForTest(gesturePx: Int, bottomPx: Int) { gestureBottom = gesturePx; bottomInset = bottomPx; requestLayout() }
+    fun setInsetsForTest(gesturePx: Int, bottomPx: Int, gestureNavigation: Boolean = true) {
+        gestureBottom = gesturePx; bottomInset = bottomPx; gestureNav = gestureNavigation; fixedInsets = true; requestLayout()
+    }
+    private var fixedInsets = false
+
+    /** for Copy diagnostics: the numbers behind the bottom row */
+    fun diag(): String = "kb: height=$height measured=$measuredHeight bottomInset=$bottomInset gestureBottom=$gestureBottom " +
+        "deadBottom=$deadBottom gestureNav=$gestureNav overlap=${screenOverlap()} rowH=${rh.toInt()} strip=${stripH.toInt()} rows=${layer.rows} dp=$dp"
+
+    /**
+     * How far this view reaches under the navigation bar, on screen (API 30+): the padding we need. 0 on IME windows that
+     * already sit above the bar (Samsung, 3-button navigation), the bar's height on edge-to-edge windows. null = unknown.
+     */
+    private fun screenOverlap(): Int? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !isAttachedToWindow || height == 0) return null
+        return runCatching {
+            val m = context.getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics
+            val nav = m.windowInsets.getInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.tappableElement()).bottom
+            val loc = IntArray(2); getLocationOnScreen(loc)
+            maxOf(0, loc[1] + height - (m.bounds.height() - nav))
+        }.getOrNull()
+    }
+
+    /** after layout: pad only for the part of the bar that actually overlaps us */
+    private fun fixBottomInset() {
+        if (fixedInsets) return
+        val o = screenOverlap() ?: return
+        if (o != bottomInset) { bottomInset = o; requestLayout() }
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (changed) post { fixBottomInset() }
+    }
 
     private fun gestureBottomOf(ins: WindowInsets?): Int {
         if (ins == null) return 0
@@ -413,8 +460,10 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     }
 
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        if (fixedInsets) return insets
         gestureBottom = gestureBottomOf(insets)
-        val b = bottomOf(insets)
+        // a first guess from the insets dispatched to this view; corrected from the on-screen overlap after layout
+        val b = screenOverlap() ?: bottomOf(insets)
         if (b != bottomInset) { bottomInset = b; requestLayout() }
         return insets
     }
@@ -425,9 +474,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        // edge-to-edge IME windows (Android 15+) can hand the insets to a parent: read the window's own insets too
-        bottomInset = maxOf(bottomInset, bottomOf(rootWindowInsets))
-        gestureBottom = maxOf(gestureBottom, gestureBottomOf(rootWindowInsets))
+        // (no maxOf with rootWindowInsets: on windows that already sit above the nav bar it double-counted the bar,
+        // left a gap under the keys and put the gesture band on the bottom row; fixBottomInset uses the real overlap)
+        if (!fixedInsets && gestureBottom == 0) gestureBottom = gestureBottomOf(rootWindowInsets)
         val w = View.MeasureSpec.getSize(widthMeasureSpec)
         // one-handed: keys in 80% of the width on one side; split (landscape): two halves of 40% with a gap
         keyW = if (oneHanded != "off" || split) w * 0.8f / 10f else w / 10f
@@ -805,7 +854,11 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 // other keys (backspace, shift, enter, layer keys) fire on press.
                 when (k.type) {
                     KeyType.TO_SYMBOLS -> symDownAt = e.eventTime
-                    KeyType.SPACE -> {}
+                    KeyType.SPACE -> {
+                        // long-press space: the keyboard picker (like Gboard); sliding cancels it
+                        spacePointer = id; spaceDownX = x; spaceLongDone = false
+                        ui.removeCallbacks(spaceLongPress); ui.postDelayed(spaceLongPress, LONG_PRESS_MS)
+                    }
                     KeyType.CHAR -> pending.down(id, k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
                     else -> listener.onKey(k, KeyboardLayout.modelTouch(ux, uy, k, layer.letterRowOffset))
                 }
@@ -823,6 +876,9 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 for (pi in 0 until e.pointerCount) {
                     val pid = e.getPointerId(pi)
                     if (e.getY(pi) < 0 && pressed[pid]?.type == KeyType.SPACE) { pressed.remove(pid); invalidate() }
+                    if (pid == spacePointer && (e.getY(pi) < 0 || kotlin.math.abs(e.getX(pi) - spaceDownX) > keyW * 0.5f)) {
+                        ui.removeCallbacks(spaceLongPress); spacePointer = -1
+                    }
                 }
                 val tr = track
                 if (tr != null && alts == null) {
@@ -870,7 +926,8 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                     alts = null
                 }
                 if (k?.type == KeyType.BACKSPACE) { repeatKey = null; ui.removeCallbacks(repeater) }
-                if (k?.type == KeyType.SPACE && e.actionMasked != MotionEvent.ACTION_CANCEL) {
+                if (id == spacePointer) { ui.removeCallbacks(spaceLongPress); spacePointer = -1 }
+                if (k?.type == KeyType.SPACE && e.actionMasked != MotionEvent.ACTION_CANCEL && !spaceLongDone) {
                     keyRect(k, rect)
                     val ux = e.getX(i); val uy = e.getY(i)
                     if (ux >= rect.left - 4 * dp && ux <= rect.right + 4 * dp && uy >= rect.top - 8 * dp && uy <= height - deadBottom.toFloat())

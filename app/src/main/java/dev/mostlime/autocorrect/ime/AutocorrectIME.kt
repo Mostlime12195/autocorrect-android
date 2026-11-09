@@ -304,6 +304,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         v?.keyAlpha = app.prefs.keyAlpha
         v?.setBackgroundImage(Prefs.bgFile(this).takeIf { app.prefs.bgStamp > 0 }, app.prefs.bgDim, app.prefs.bgBlur)
         v?.oneHanded = app.prefs.oneHanded
+        // navigation_mode 2 = gesture navigation; 0 / 1 (3- / 2-button) have no swipe-up to keep away from
+        v?.gestureNav = runCatching { android.provider.Settings.Secure.getInt(contentResolver, "navigation_mode") == 2 }.getOrDefault(false)
+        v?.postDelayed({ writeDiag() }, 800)
         v?.split = app.prefs.splitLandscape && resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         v?.haptics = app.prefs.haptics
         v?.swipeEnabled = app.prefs.swipe && policy.autocorrect
@@ -408,6 +411,15 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
     override fun onSettings() {
         startActivity(android.content.Intent(this, dev.mostlime.autocorrect.ui.SettingsActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** the bottom-row numbers for settings -> About -> Copy diagnostics (the settings screen is another process) */
+    private fun writeDiag() {
+        val v = kv ?: return
+        val nav = runCatching { android.provider.Settings.Secure.getInt(contentResolver, "navigation_mode") }.getOrDefault(-1)
+        val text = "${v.diag()} navMode=$nav device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT} " +
+            "app=${BuildConfig.VERSION_NAME} model=${EngineHolder.spec?.id} threads=${EngineHolder.sessionThreads}"
+        runCatching { java.io.File(filesDir, "diag.txt").writeText(text) }
     }
 
     override fun onSwitchIme() {

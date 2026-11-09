@@ -441,6 +441,45 @@ class LearningTest {
         assertTrue(user.probationWords().isEmpty())
     }
 
+    /** a re-check (pause, or every N words) never touches the word at the cursor */
+    @Test fun recheckNeverChangesTheWordAtTheCursor() {
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "test" }, "t", recheckEvery = 1))
+        engine.wordLm = farLm; engine.rewindLm = farLm
+        type("i want too go to the shop and then home now too")      // "too" (the last one) is still being typed
+        engine.deliver()
+        timer.fireAll()
+        engine.deliverRewinds()
+        assertTrue(ed.text.toString(), ed.text.endsWith(" too"))
+        assertEquals("too", ed.composingText)
+    }
+
+    /** a short out-of-vocabulary word needing two letters changed ("wruff" -> "stuff") is underlined, not replaced */
+    @Test fun riskyShortWordIsUnderlinedNotReplaced() {
+        start()
+        engine.crafted["wruff"] = result("wruff", listOf("wruff", "stuff"), doubleArrayOf(0.0, 6.0))
+        type("that wruff ")
+        engine.deliver()
+        assertEquals("that wruff ", ed.text.toString())
+        timer.fireAll()
+        assertEquals("stuff", ed.marks["that ".length]?.first())
+    }
+
+    /** tapping a word shows its alternatives; a tap swaps one in */
+    @Test fun tappingAWordOffersItsAlternatives() {
+        start()
+        engine.suggestions = { t -> if (t == "fixed") listOf("fixed", "fixes", "mixed") else emptyList() }
+        type("fized it ")
+        engine.deliver()
+        assertEquals("fixed it ", ed.text.toString())
+        // the cursor goes into "fixed" (FakeEditor keeps it at the end, so put "fixed" last)
+        ed.text.setLength(0); ed.text.append("so fixed")
+        ctl.cursorMoved(ed.text.length, ed.text.length)
+        assertEquals(StripMode.WORD_ALTS, ctl.stripMode)
+        assertEquals("fized", ctl.shown[0])                  // the word as typed comes first after a correction
+        ctl.pickSuggestion(ctl.shown.indexOf("mixed"))
+        assertEquals("so mixed", ed.text.toString())
+    }
+
     @Test fun spellingClassification() {
         start()
         assertTrue(ctl.isSpellingEdit("fized", "fixed"))

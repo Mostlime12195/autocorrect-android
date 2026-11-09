@@ -184,15 +184,28 @@ class KeyboardControllerTest {
         }
     }
 
+    /** a slow phone (~500 ms per word): the fix for "teh" lands while "qui" is being typed */
     @Test fun slowResultLandsWhileNextWordIsBeingTyped() {
         type("teh qui")
         assertEquals("teh qui", ed.text.toString())
         engine.deliver()
-        assertEquals("the qui", ed.text.toString())
-        assertEquals("qui", ed.composingText)            // the whole word stays composing (underlined)
+        // the word being typed is never touched: the fix waits for the next separator
+        assertEquals("teh qui", ed.text.toString())
+        assertEquals("qui", ed.composingText)
         type("ck ")
+        assertEquals("the quick ", ed.text.toString())     // applied at the space, "quick" intact
         engine.deliver()
         assertEquals("the quick ", ed.text.toString())
+        assertEquals(-1, ed.cs)
+    }
+
+    /** the user changed the target word before its late fix arrived: nothing happens */
+    @Test fun lateFixForAnEditedWordIsDropped() {
+        type("teh qui")
+        type("\b\b\b\b\b")                                  // "qui", the space and the "h" deleted
+        type("a ")
+        engine.deliver(engine.queue.size)
+        assertTrue(ed.text.toString(), ed.text.startsWith("tea"))
     }
 
     @Test fun lateResultsStillApplyWithoutDuplicates() {
@@ -207,7 +220,7 @@ class KeyboardControllerTest {
         // "keybiard," then " I gu" typed before the slow result arrives (the v0.1.13 miss)
         type("this is a usable keybiard, I gu")
         engine.deliver(engine.queue.size)
-        assertTrue(ed.text.toString(), ed.text.endsWith("usable keyboard, I gu"))
+        assertTrue(ed.text.toString(), ed.text.endsWith("usable keybiard, I gu"))   // waits: "gu" is being typed
         assertEquals("gu", ed.composingText)
         type("ess ")
         engine.deliver(engine.queue.size)

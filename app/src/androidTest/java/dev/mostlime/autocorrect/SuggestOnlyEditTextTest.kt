@@ -159,6 +159,47 @@ class SuggestOnlyEditTextTest {
         inst.runOnMainSync { assertEquals(typed, et.text.toString()) }
     }
 
+    /** a slow phone: every correction takes 500 ms; "teh quick " typed fast ends as "the quick " with the cursor at the end */
+    @Test fun lateFixNeverBreaksTheWordBeingTyped() {
+        lateinit var et: EditText
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        val realTimer = object : Timer {
+            override fun post(delayMs: Long, r: () -> Unit): Any { val t = Runnable { r() }; h.postDelayed(t, delayMs); return t }
+            override fun cancel(token: Any) { h.removeCallbacks(token as Runnable) }
+        }
+        val slow = object : CorrectionEngine {
+            override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) {
+                var out: WordResult? = null; engine.correct(req) { out = it }
+                h.postDelayed({ done(out) }, 500)
+            }
+            override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
+            override fun cancelQueued() {}
+        }
+        inst.runOnMainSync {
+            et = EditText(ctx)
+            val info = EditorInfo().apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }
+            val ic = et.onCreateInputConnection(info)
+            val ed = IcEditor(ctx, { ic }, { info }, {}, {})
+            val ctl = KeyboardController({ ed }, slow, object : ControllerUi {
+                override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
+                override fun setShift(shift: Shift) {}
+                override fun onResult(r: WordResult?) {}
+            }, realTimer) {}
+            ctl.startInput(ControllerConfig(FieldPolicy.of(android.text.InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "t" }, "t"))
+            "teh quick ".forEachIndexed { i, c ->
+                h.postDelayed({
+                    val k = if (c == ' ') KeyboardLayout.LETTERS.keys.first { it.type == KeyType.SPACE } else KeyboardLayout.LETTERS.keys.first { it.text == c.toString() }
+                    ctl.key(k, Touch.APOS)
+                }, i * 60L)
+            }
+        }
+        Thread.sleep(10 * 60L + 2500L)
+        inst.runOnMainSync {
+            assertEquals("the quick ", et.text.toString())
+            assertEquals(et.text.length, et.selectionStart)
+        }
+    }
+
     @Test fun bigJpegBackgroundIsSavedAtScreenWidth() {
         val dir = File(ctx.cacheDir, "bgtest").apply { mkdirs() }
         val src = File(dir, "big.jpg")

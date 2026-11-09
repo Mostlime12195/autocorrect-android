@@ -33,12 +33,12 @@ class BottomRowTouchTest {
         override fun onSettings() {}
     }
 
-    private fun view(gesture: Int, bottom: Int): Pair<KeyboardView, Rec> {
+    private fun view(gesture: Int, bottom: Int, gestureNav: Boolean = true, clipBy: Int = 0): Pair<KeyboardView, Rec> {
         val r = Rec()
         val v = KeyboardView(ctx, r)
-        v.setInsetsForTest(gesture, bottom)
+        v.setInsetsForTest(gesture, bottom, gestureNav)
         v.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+        v.layout(0, 0, v.measuredWidth, v.measuredHeight - clipBy)   // clipBy: the window didn't give us the height we asked for
         return v to r
     }
 
@@ -68,6 +68,49 @@ class BottomRowTouchTest {
             assertEquals(listOf(KeyType.SPACE, KeyType.CHAR, KeyType.ENTER, KeyType.TO_SYMBOLS), r.keys)
             assertEquals(0, KeyboardView.deadBand((48 * dp).toInt(), 0))
         }
+    }
+
+    /** Galaxy A12 (3-button nav): 48 dp gesture inset AND 48 dp bottom inset reported, window 48 dp shorter than asked */
+    @Test fun threeButtonNavNeverDeadensTheBottomRow() {
+        for (gestureNav in listOf(false, true)) inst.runOnMainSync {
+            val (v, r) = view((48 * dp).toInt(), (48 * dp).toInt(), gestureNav, clipBy = (48 * dp).toInt())
+            val keysBottom = v.height - 8 * dp            // the padding we asked for didn't fit: keys end 8 dp above the bottom
+            val y = keysBottom - 3 * dp                  // the lowest part of the bottom row
+            tap(v, v.width * 0.5f, y)                    // space
+            tap(v, v.width * 0.80f, y)                   // .
+            assertEquals("gestureNav=$gestureNav", listOf(KeyType.SPACE, KeyType.CHAR), r.keys)
+        }
+    }
+
+    @Test fun longPressSpaceOpensThePickerAndDragCancelsIt() {
+        lateinit var v: KeyboardView
+        val switched = java.util.concurrent.atomic.AtomicInteger()
+        val keys = ArrayList<KeyType>()
+        inst.runOnMainSync {
+            v = KeyboardView(ctx, object : KeyboardView.Listener {
+                override fun onKey(key: KeyDef, touch: Touch) { keys.add(key.type) }
+                override fun onAlternate(key: KeyDef, text: String, touch: Touch) {}
+                override fun onSuggestion(index: Int) {}
+                override fun onSwitchIme() { switched.incrementAndGet() }
+                override fun onSettings() {}
+            })
+            v.setInsetsForTest(0, 0, false)
+            v.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+        }
+        val t = SystemClock.uptimeMillis()
+        var y = 0f
+        inst.runOnMainSync { y = bottomRowY(v); ev(v, MotionEvent.ACTION_DOWN, v.width * 0.5f, y, t) }
+        Thread.sleep(800)
+        inst.runOnMainSync { ev(v, MotionEvent.ACTION_UP, v.width * 0.5f, y, t) }
+        assertEquals(1, switched.get())
+        assertTrue("typed $keys", keys.isEmpty())
+        // a drag along the space bar is not a long press
+        val t2 = SystemClock.uptimeMillis()
+        inst.runOnMainSync { ev(v, MotionEvent.ACTION_DOWN, v.width * 0.4f, y, t2); ev(v, MotionEvent.ACTION_MOVE, v.width * 0.6f, y, t2) }
+        Thread.sleep(800)
+        inst.runOnMainSync { ev(v, MotionEvent.ACTION_UP, v.width * 0.6f, y, t2) }
+        assertEquals(1, switched.get())
     }
 
     @Test fun swipeUpFromTheGestureHandleNeverTypes() {

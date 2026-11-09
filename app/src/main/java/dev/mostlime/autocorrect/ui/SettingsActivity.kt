@@ -130,6 +130,15 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 true
             }
             findPreference<Preference>("spell_checker")?.setOnPreferenceClickListener { openSpellCheckerSettings(); true }
+            findPreference<Preference>("copy_diag")?.setOnPreferenceClickListener {
+                val f = java.io.File(requireContext().filesDir, "diag.txt")
+                val text = (if (f.exists()) f.readText() else "kb: (open the keyboard once first)") +
+                    "\nsettings: app=${BuildConfig.VERSION_NAME} device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} sdk=${android.os.Build.VERSION.SDK_INT}"
+                val cm = requireContext().getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Keylime diagnostics", text))
+                Toast.makeText(requireContext(), "Diagnostics copied", Toast.LENGTH_SHORT).show()
+                true
+            }
             findPreference<Preference>("clear_learned")?.setOnPreferenceClickListener {
                 app.user.clearLearned(); Toast.makeText(requireContext(), "Undone edits forgotten", Toast.LENGTH_SHORT).show(); true
             }
