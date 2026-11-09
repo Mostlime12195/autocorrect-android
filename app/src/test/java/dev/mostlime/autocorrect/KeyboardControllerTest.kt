@@ -320,14 +320,12 @@ class KeyboardControllerTest {
         engine.deliverRewinds()
         assertTrue(ed.text.toString(), ed.text.endsWith("went to the store "))
         assertTrue(events.any { it["type"] == "rewind" && it["from"] == "too" && it["to"] == "to" })
-        // undo chip puts it back, and it is never rewound again
-        assertEquals("too", ctl.shown[1])
-        ctl.pickSuggestion(1)
-        assertTrue(ed.text.toString(), ed.text.endsWith("went too the store "))
+        // no revert chip in the strip (Gboard-like), and the word isn't rewound again
+        assertTrue(ctl.shown.isEmpty())
         type("now ")
         engine.deliver(engine.queue.size)
         engine.deliverRewinds()
-        assertTrue(ed.text.toString(), ed.text.endsWith("went too the store now "))
+        assertTrue(ed.text.toString(), ed.text.endsWith("went to the store now "))
     }
 
     @Test fun rewindNeedsAClearMarginAndUnchangedText() {

@@ -751,7 +751,7 @@ class KeyboardController(
         // start of the changed word in the counter, after this edit (changes before it shifted it)
         val shift = changes.filter { it.start < c.start }.sumOf { it.to.length - it.from.length }
         rewindUndo = RewindUndo(end - (snap.length - c.start) + shift, c.from, c.to, lastEv)
-        if (cur.isEmpty()) setStrip(listOf(c.to, c.from), 0, StripMode.REWIND, undo = 1)
+        // no revert chip in the strip (keep the UI simple); a rewind is a normal edit from here on
     }
 
     /** Undo chip of a rewind: put the original word back, if the text there is unchanged. */
@@ -844,9 +844,9 @@ class KeyboardController(
         if (xi == 0) last = Last(pd.typed, pd.touches, out, pd.sepText, r, ev, undoPrefix) else ev?.let { write(it) }
         prev = if (mg != null || !newest || xi != cur.length) null else Prev(r.slot, r.chosen, out, r.lmScored, pd.typed, pd.touches, if (r.lmScored) r.margin else 0.0, if (r.lmScored) r.scores else null)
         if (xi == 0 && out != pd.typed) {
-            val ranked = r.ranked(3).toMutableList()
-            if (pd.typed !in ranked) { if (ranked.size >= 3) ranked[2] = pd.typed else ranked.add(pd.typed) }
-            setStrip(ranked, ranked.indexOf(out), StripMode.LAST_WORD, undo = ranked.indexOf(pd.typed))
+            // Gboard-like: plain alternatives, no "undo" pill and not the word as typed (backspace right after undoes)
+            val ranked = r.ranked(4).filter { it != pd.typed }.take(3)
+            setStrip(ranked, ranked.indexOf(out), StripMode.LAST_WORD)
         }
     }
 
@@ -1013,6 +1013,7 @@ class KeyboardController(
      * app, also those that ignore SuggestionSpans).
      */
     fun cursorMoved(selStart: Int, selEnd: Int) {
+        if (!config.suggestOnly) return   // auto-correct mode shows no typo chips
         if (holding || composing.isNotEmpty() || selStart != selEnd || selStart < 0 || flags.isEmpty()) {
             if (cursorFlag != null && selStart != selEnd) { cursorFlag = null; if (stripMode == StripMode.TYPO) setStrip(emptyList(), -1, StripMode.NONE) }
             return
@@ -1096,6 +1097,7 @@ class KeyboardController(
     private fun showTypo() = showFlagChip()
 
     private fun showFlagChip() {
+        if (!config.suggestOnly) return   // auto-correct mode: no chips, unsure words just get their underline
         if (composing.isNotEmpty() || flags.isEmpty() || (stripMode != StripMode.NONE && stripMode != StripMode.FLAG)) return
         val ed = ed() ?: return
         val cur = ed.cursorPos()
@@ -1130,7 +1132,7 @@ class KeyboardController(
             if (learning.noteSpellingUndo(typed) >= UNDOS_TO_ADD && learning.addWord(typed)) {
                 dictAdded = typed
                 ui.onDictAdded(typed)
-                setStrip(listOf(typed), -1, StripMode.DICT_ADDED, hint = "added to dictionary", action = "undo")
+                // a toast says so; the word can be removed in settings (no extra pill in the strip)
             }
         } else suppressEdit(typed, out, "undo", ev)
     }

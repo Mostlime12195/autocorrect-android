@@ -64,7 +64,8 @@ class LearningTest {
             }
         }
         override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) { queue.add(req to done) }
-        override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
+        var suggestions: ((String) -> List<String>)? = null
+        override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) { suggestions?.let { done(it(typed)) } }
         override fun cancelQueued() {}
         override fun rewind(targets: List<dev.mostlime.autocorrect.engine.RewindTarget>, done: (List<dev.mostlime.autocorrect.engine.RewindChange>) -> Unit) { rewinds++; pendingRewinds.add(targets to done) }
         fun deliver() {
@@ -180,14 +181,26 @@ class LearningTest {
         assertTrue(events.none { it["type"] == "not_typo" })
     }
 
-    @Test fun longPressTypedWordAddsToDictionary() {
+    /** after an auto-correction the strip has plain alternatives only: no undo pill, not the word as typed */
+    @Test fun autoCorrectStripHasNoRevertChip() {
         start()
         type("fized ")
         engine.deliver()
         assertEquals("fixed ", ed.text.toString())
+        assertTrue(ctl.shown.toString(), "fized" !in ctl.shown)
+        assertEquals(null, ctl.shownAction)
+        type("\b")                                        // backspace is the undo
+        assertEquals("fized", ed.text.toString())
+    }
+
+    /** long-press the word as typed while typing: dictionary */
+    @Test fun longPressTypedWordWhileTypingAddsToDictionary() {
+        start()
+        engine.suggestions = { t -> listOf(t, "fixed") }
+        type("fized")
         val i = ctl.shown.indexOf("fized")
+        assertTrue(ctl.shown.toString(), i >= 0)
         ctl.longPressSuggestion(i)
-        assertEquals("fized ", ed.text.toString())
         assertTrue(user.has("fized"))
         assertEquals(listOf("fized"), added)
     }
@@ -244,12 +257,11 @@ class LearningTest {
         assertTrue(ed.text.toString(), ed.text.endsWith("fized fized fized "))
     }
 
-    @Test fun autoAddCanBeTakenBack() {
+    @Test fun autoAddShowsNoPill() {
         start()
         repeat(2) { type("fized "); engine.deliver(); type("\b") ; if (it == 0) type(" ") }
-        assertEquals(StripMode.DICT_ADDED, ctl.stripMode)
-        ctl.stripAction()
-        assertFalse(user.has("fized"))
+        assertTrue(user.has("fized"))
+        assertEquals(null, ctl.shownAction)
     }
 
     @Test fun grammarUndosNeverTouchTheDictionary() {

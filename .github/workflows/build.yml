@@ -129,11 +129,13 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          # instrumented tests (real EditText / ImageDecoder) first; they uninstall their debug build afterwards
+          # instrumented tests (real EditText / ImageDecoder) first; they uninstall their debug build afterwards.
+          # The release APK is arm64-only, so the smoke test installs the debug build (arm64 + x86_64) instead.
           script: |
             ./gradlew --stacktrace :app:connectedDebugAndroidTest || echo "INSTRUMENTED TESTS FAILED" | tee smoke-instrumented-failed.txt
             mkdir -p smoke && cp -r app/build/reports/androidTests smoke/ 2>/dev/null || true
-            .github/scripts/smoke.sh "$(ls autocorrect-*.apk | head -1)"
+            ./gradlew --stacktrace :app:assembleDebug
+            .github/scripts/smoke.sh app/build/outputs/apk/debug/app-debug.apk
             [ ! -f smoke-instrumented-failed.txt ]
       - uses: actions/upload-artifact@v7
         if: always()

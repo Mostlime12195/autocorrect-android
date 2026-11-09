@@ -14,7 +14,6 @@ android {
         targetSdk = 37
         versionCode = runNumber
         versionName = "0.1.$runNumber"
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -32,7 +31,10 @@ android {
     }
 
     buildTypes {
+        // x86_64 only for the CI emulator (debug / instrumented builds); phones get arm64-v8a, half the APK size
+        debug { ndk { abiFilters += listOf("arm64-v8a", "x86_64") } }
         release {
+            ndk { abiFilters += listOf("arm64-v8a") }
             isMinifyEnabled = false
             signingConfig = if (ksPath != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }

@@ -122,6 +122,37 @@ PY
   case "$TEXT2" in *"wnat to go hoem"*) echo "OK: suggest-only left the typos as typed";; *) echo "WARN: suggest-only text changed or missing";; esac
 fi
 
+
+# RAM of the keyboard process (PSS), idle and mid-typing, with the model the emulator picked (m1 Lite on this small
+# AVD) and then with m2
+pss() { echo "PSS $1: $(adb shell dumpsys meminfo dev.mostlime.autocorrect:ime | grep -E 'TOTAL PSS:|^ *TOTAL ' | head -1 | tr -s ' ')"; }
+focus_box() {
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null; adb pull /sdcard/ui.xml smoke/ui_f.xml >/dev/null
+  B=$(grep -o 'resource-id="dev.mostlime.autocorrect:id/try_it"[^>]*bounds="[^"]*"' smoke/ui_f.xml | grep -o 'bounds="[^"]*"' | grep -o '[0-9]*' | tr '\n' ' ')
+  [ -n "$B" ] && { set -- $B; adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 )); }
+}
+type_taps() { while read X Y; do adb shell input tap $X $Y < /dev/null; sleep 0.3; done < smoke/taps2.txt; }
+measure() {
+  focus_box; sleep 5
+  pss "$1 idle"
+  type_taps & TP=$!
+  sleep 5; pss "$1 mid-typing"
+  wait $TP; sleep 2; pss "$1 after typing"
+}
+MODEL1=$(adb logcat -d | grep -o "AcEngine: session [a-z0-9_]* ready" | tail -1 | awk '{print $3}')
+measure "${MODEL1:-model}"
+# switch off the Lite model -> m2 (downloads ~80 MB), then measure again
+adb shell input keyevent KEYCODE_BACK; sleep 1
+adb shell am start -n dev.mostlime.autocorrect/.ui.SettingsActivity >/dev/null; sleep 3
+if tap_text "Model" && sleep 2 && tap_text "Lite model"; then
+  for i in $(seq 1 30); do
+    adb logcat -d | grep -q "AcEngine: session m2s_int4 ready" && break
+    adb shell input keyevent KEYCODE_BACK; sleep 1; focus_box; sleep 10
+  done
+  adb logcat -d | grep "AcEngine: session m2s_int4 ready" | tail -1
+  adb logcat -d | grep -q "AcEngine: session m2s_int4 ready" && measure "m2s_int4"
+fi
+
 adb logcat -d > smoke/logcat.txt
 grep -E "AcEngine|AcIME|AcLog|ModelStore" smoke/logcat.txt | tail -30
 echo "per-word timings:"; grep "AcIME: word" smoke/logcat.txt | sed 's/.*AcIME: //'
