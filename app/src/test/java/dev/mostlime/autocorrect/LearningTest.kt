@@ -480,22 +480,27 @@ class LearningTest {
         assertEquals("so mixed", ed.text.toString())
     }
 
-    /** the chip is a toggle (fix, then back), and only for the word just finished or up to 2 words back */
-    @Test fun flagChipTogglesAndOnlyForRecentWords() {
+    /** one tap on the pill fixes; it's only for the word just finished or up to 2 words back; the switch turns it off */
+    @Test fun fixPillOnlyForRecentWordsAndCanBeTurnedOff() {
         start(suggestOnly = true)
         type("so teh quick ")
         engine.deliver()
         assertEquals("teh → the", ctl.shownAction)
         ctl.stripAction()
         assertEquals("so the quick ", ed.text.toString())
-        assertEquals("the → teh", ctl.shownAction)          // tap again = back to the word as typed
-        ctl.stripAction()
-        assertEquals("so teh quick ", ed.text.toString())
-        assertEquals("teh → the", ctl.shownAction)
-        // three words later the chip is gone
-        type("brown fox ")
+        assertEquals(null, ctl.shownAction)                 // no flip-back pill
+        type("a fized it ")
+        engine.deliver()
+        assertEquals("fized → fixed", ctl.shownAction)
+        type("is a lot ")                                    // three words later the pill is gone
         engine.deliver()
         assertEquals(null, ctl.shownAction)
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "test" }, "t",
+            suggestOnly = true, fixPill = false))
+        type("so teh ")
+        engine.deliver()
+        assertEquals(null, ctl.shownAction)
+        assertEquals(StripMode.NONE, ctl.stripMode)
     }
 
     @Test fun spellingClassification() {

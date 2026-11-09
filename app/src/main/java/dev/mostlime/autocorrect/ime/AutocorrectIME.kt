@@ -320,7 +320,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
         ctl.startInput(ControllerConfig(policy, app.prefs.autocorrect, app.prefs.style, { EngineHolder.spec?.id ?: "none" }, BuildConfig.VERSION_NAME,
             suggestOnly = app.prefs.suggestOnly, confidentOnly = app.prefs.confidentOnly, autoCap = app.prefs.autoCap,
             flagTypos = app.prefs.flagTypos, idlePauseMs = app.prefs.idlePauseMs, recheckEvery = app.prefs.recheckEvery,
-            wholeField = app.prefs.wholeField, ctxChars = maxOf(KeyboardController.CTX_CHARS, app.prefs.ctxTokens * 5)))
+            wholeField = app.prefs.wholeField, ctxChars = maxOf(KeyboardController.CTX_CHARS, app.prefs.ctxTokens * 5),
+            fixPill = app.prefs.fixPill))
         root?.hidePanel()
         if (!app.prefs.clipboard) clips.clear()
         updateClipChip()

@@ -140,6 +140,8 @@ class ControllerConfig(
     val wholeField: Boolean = false,
     /** left context handed to the model, chars (the scorer clips to its token budget) */
     val ctxChars: Int = KeyboardController.CTX_CHARS,
+    /** suggest-only: the "teh → the" pill in the strip */
+    val fixPill: Boolean = true,
 )
 
 /**
@@ -306,7 +308,7 @@ class KeyboardController(
         config = cfg
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
         typo = null; dictAdded = null; pendingUndo = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
-        chipFlag = null; spansDropped = false; marked.clear(); applied = null
+        chipFlag = null; spansDropped = false; marked.clear()
         idleToken?.let { timer.cancel(it) }; idleToken = null
         markToken?.let { timer.cancel(it) }; markToken = null
         pendingRemarks.clear(); wordsSinceCheck = 0; periodicDue = false
@@ -1028,26 +1030,13 @@ class KeyboardController(
         when (stripMode) {
             StripMode.TYPO -> notTypo(ed)
             StripMode.FLAG -> {
-                // an explicit tap on the chip: the only way a flagged word changes. It's a toggle: fix, then back.
-                val a = applied
-                if (chipFlag == null && a != null) {
-                    applied = null
-                    val f = Flag(a.start, a.fix, listOf(a.typed), a.flag.spelling, null, a.flag.leftContext)
-                    if (replaceFlag(ed, f, a.typed)) {
-                        // the word as typed is back: so is its flag
-                        addFlag(Flag(f.start, a.typed, a.flag.fixes, a.flag.spelling, a.flag.event, a.flag.leftContext))
-                    }
-                    setStrip(emptyList(), -1, StripMode.NONE)
-                    showFlagChip()
-                    return
-                }
+                // an explicit tap on the chip: the only way a flagged word changes
                 val f = chipFlag ?: return
                 chipFlag = null
                 val to = f.fixes.first()
                 typo?.let { t -> if (t.typed == f.word) typo = null }
                 if (replaceFlag(ed, f, to)) {
                     f.event?.let { val e = LinkedHashMap(it); e["outcome"] = "strip_pick"; e["final"] = to; e["ts"] = System.currentTimeMillis(); write(e) }
-                    applied = Applied(f.start, f.word, to, f)
                 }
                 setStrip(emptyList(), -1, StripMode.NONE)
                 showFlagChip()
@@ -1250,22 +1239,12 @@ class KeyboardController(
 
     private fun showFlagChip() {
         if (!config.suggestOnly) return   // auto-correct mode: no chips, unsure words just get their underline
-        if (composing.isNotEmpty() || (flags.isEmpty() && applied == null) || (stripMode != StripMode.NONE && stripMode != StripMode.FLAG)) return
+        if (!config.fixPill) return       // turned off (the system spell checker's underlines cover it)
+        if (composing.isNotEmpty() || flags.isEmpty() || (stripMode != StripMode.NONE && stripMode != StripMode.FLAG)) return
         val ed = ed() ?: return
         val cur = ed.cursorPos()
         if (cur < 0) return
         fun short(w: String) = if (w.length > 14) w.take(13) + "…" else w
-        // a fix just applied from the chip: the chip turns it back (a toggle), while the word is still recent
-        applied?.let { a ->
-            val f = Flag(a.start, a.fix, listOf(a.typed), a.flag.spelling, null, a.flag.leftContext)
-            if (recent(ed, f, cur) && locate(ed, f, cur)) {
-                a.start = f.start
-                chipFlag = null
-                setStrip(emptyList(), -1, StripMode.FLAG, action = "${short(a.fix)} → ${short(a.typed)}")
-                return
-            }
-            applied = null
-        }
         // only the word just finished or up to 2 words back, and only if it's still there (edited words drop out)
         val f = flags.filter { it.start <= cur }.sortedByDescending { it.start }
             .firstOrNull { recent(ed, it, cur) && locate(ed, it, cur) } ?: run { if (stripMode == StripMode.FLAG) setStrip(emptyList(), -1, StripMode.NONE); return }
@@ -1281,9 +1260,7 @@ class KeyboardController(
         return SEG.findAll(since).count() <= CHIP_WORDS_BACK
     }
 
-    /** the chip's last fix (typed -> fix), so a second tap puts the word as typed back */
-    private class Applied(var start: Int, val typed: String, val fix: String, val flag: Flag)
-    private var applied: Applied? = null
+
 
     /**
      * A spelling fix changes one word that isn't in the vocabulary into a different word. Capitals-only, punctuation or

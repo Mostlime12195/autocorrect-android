@@ -224,9 +224,13 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             for (i in tries) if (runCatching { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
         }
 
-        private fun spellCheckerSummary(): String {
+        private fun keylimeIsSpellChecker(): Boolean {
             val sel = runCatching { Settings.Secure.getString(requireContext().contentResolver, "selected_spell_checker") }.getOrNull().orEmpty()
-            val ours = sel.startsWith(requireContext().packageName + "/")
+            return sel.startsWith(requireContext().packageName + "/")
+        }
+
+        private fun spellCheckerSummary(): String {
+            val ours = keylimeIsSpellChecker()
             return (if (ours) "On: Keylime is the spell checker. " else "") +
                 "Red underlines with a fix menu in apps' text fields. Pick Keylime in Settings → System → Languages → Spell checker."
         }
@@ -498,6 +502,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 findPreference<Preference>("stats")?.summary = st
             }
             findPreference<Preference>("spell_checker")?.summary = spellCheckerSummary()
+            findPreference<Preference>(Prefs.FIX_PILL)?.isVisible = keylimeIsSpellChecker()
             app.user.reloadIfChanged()
             findPreference<Preference>("dictionary")?.summary = when (val n = app.user.size) {
                 0 -> "Words that are never corrected or flagged"

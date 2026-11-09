@@ -32,6 +32,8 @@ class Prefs(private val ctx: Context) {
     val suggestOnly get() = sp.getString(CORRECTION_MODE, "auto") == "suggest"
     val confidentOnly get() = sp.getBoolean(CONFIDENT_ONLY, false)
     /** "Flag likely typos": until the user sets it, on in suggest-only mode and off in auto-correct mode */
+    /** suggest-only "teh → the" pill (the switch shows only when Keylime is the system spell checker) */
+    val fixPill get() = sp.getBoolean(FIX_PILL, true)
     val flagTypos get() = if (sp.contains(FLAG_TYPOS)) sp.getBoolean(FLAG_TYPOS, true) else suggestOnly
     val swipe get() = sp.getBoolean(SWIPE, true)
     val clipboard get() = sp.getBoolean(CLIPBOARD, true)
@@ -154,6 +156,7 @@ class Prefs(private val ctx: Context) {
         const val CORRECTION_MODE = "correction_mode"
         const val CONFIDENT_ONLY = "confident_only"
         const val FLAG_TYPOS = "flag_typos"
+        const val FIX_PILL = "fix_pill"
         const val SWIPE = "swipe_typing"
         const val CLIPBOARD = "clipboard"
         const val NUMBER_ROW = "number_row"
