@@ -95,7 +95,7 @@ class SuggestOnlyEditTextTest {
             assertEquals(3, text.getSpanStart(s)); assertEquals(6, text.getSpanEnd(s))
             assertEquals("the", s!!.suggestions[0])
             // keep typing: the mark stays, the chip fixes it in place
-            for (c in "quick brown fox ") {
+            for (c in "quick brown ") {
                 val k = if (c == ' ') KeyboardLayout.LETTERS.keys.first { it.type == KeyType.SPACE } else KeyboardLayout.LETTERS.keys.first { it.text == c.toString() }
                 ctl.key(k, Touch.APOS)
             }
@@ -103,7 +103,7 @@ class SuggestOnlyEditTextTest {
             assertEquals(KeyboardController.StripMode.FLAG, ctl.stripMode)
             assertEquals("teh → the", ctl.shownAction)
             ctl.stripAction()
-            assertEquals("so the quick brown fox ", et.text.toString())
+            assertEquals("so the quick brown ", et.text.toString())
             assertEquals(et.text.length, et.selectionStart)
         }
     }

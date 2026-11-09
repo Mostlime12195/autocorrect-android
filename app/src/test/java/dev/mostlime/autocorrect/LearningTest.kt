@@ -121,9 +121,9 @@ class LearningTest {
     // ------------------------------------------------------------------ suggest-only
     @Test fun suggestOnlyNeverEditsAndMarksTypos() {
         start(suggestOnly = true)
-        type("so i want teh quick brown fox ")
+        type("so i want teh quick brown ")
         engine.deliver()
-        assertEquals("so i want teh quick brown fox ", ed.text.toString())   // not even i -> I
+        assertEquals("so i want teh quick brown ", ed.text.toString())   // not even i -> I
         assertTrue(ed.marks.isEmpty())                     // nothing written while typing
         // one small chip at the side; the strip's word cells stay empty for candidates
         assertEquals(StripMode.FLAG, ctl.stripMode)
@@ -135,10 +135,10 @@ class LearningTest {
         timer.fireAll()
         val at = "so i want ".length
         assertEquals("the", ed.marks[at]?.first())
-        assertEquals("so i want teh quick brown fox ", ed.text.toString())
+        assertEquals("so i want teh quick brown ", ed.text.toString())
         // tapping the chip is an explicit edit: allowed
         ctl.stripAction()
-        assertEquals("so i want the quick brown fox ", ed.text.toString())
+        assertEquals("so i want the quick brown ", ed.text.toString())
         assertTrue(!ed.marks.containsKey(at))
         assertTrue(events.any { it["outcome"] == "strip_pick" && it["final"] == "the" })
     }
@@ -348,7 +348,7 @@ class LearningTest {
         start(suggestOnly = true)
         type("so teh quick brown fox is great ")
         engine.deliver()
-        assertEquals(StripMode.FLAG, ctl.stripMode)
+        assertEquals(StripMode.NONE, ctl.stripMode)         // 5 words back: no chip
         ctl.pickSuggestion(-1)                              // nothing
         // the user moves on; the strip shows something else
         type("a")
@@ -478,6 +478,24 @@ class LearningTest {
         assertEquals("fized", ctl.shown[0])                  // the word as typed comes first after a correction
         ctl.pickSuggestion(ctl.shown.indexOf("mixed"))
         assertEquals("so mixed", ed.text.toString())
+    }
+
+    /** the chip is a toggle (fix, then back), and only for the word just finished or up to 2 words back */
+    @Test fun flagChipTogglesAndOnlyForRecentWords() {
+        start(suggestOnly = true)
+        type("so teh quick ")
+        engine.deliver()
+        assertEquals("teh → the", ctl.shownAction)
+        ctl.stripAction()
+        assertEquals("so the quick ", ed.text.toString())
+        assertEquals("the → teh", ctl.shownAction)          // tap again = back to the word as typed
+        ctl.stripAction()
+        assertEquals("so teh quick ", ed.text.toString())
+        assertEquals("teh → the", ctl.shownAction)
+        // three words later the chip is gone
+        type("brown fox ")
+        engine.deliver()
+        assertEquals(null, ctl.shownAction)
     }
 
     @Test fun spellingClassification() {
