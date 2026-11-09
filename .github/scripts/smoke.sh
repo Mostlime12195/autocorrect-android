@@ -21,9 +21,18 @@ read W H < <(adb shell wm size | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\1 \2/p' 
 DPI=$(adb shell wm density | sed -n 's/.*: \([0-9]*\).*/\1/p' | tail -1)
 echo "screen ${W}x${H} @ ${DPI}dpi"
 # focus the "Try the keyboard here" box (first EditText) via its bounds in a UI dump
-adb shell uiautomator dump /sdcard/ui.xml >/dev/null
-adb pull /sdcard/ui.xml smoke/ui0.xml >/dev/null
-B=$(grep -o 'resource-id="dev.mostlime.autocorrect:id/try_it"[^>]*bounds="[^"]*"' smoke/ui0.xml | grep -o 'bounds="[^"]*"' | grep -o '[0-9]*' | tr '\n' ' ')
+# (retry: right after start the window can still be a system dialog / not drawn yet)
+B=""
+for i in 1 2 3 4 5 6 7 8; do
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null
+  adb pull /sdcard/ui.xml smoke/ui0.xml >/dev/null
+  B=$(grep -o 'resource-id="dev.mostlime.autocorrect:id/try_it"[^>]*bounds="[^"]*"' smoke/ui0.xml | grep -o 'bounds="[^"]*"' | grep -o '[0-9]*' | tr '\n' ' ')
+  [ -n "$B" ] && break
+  echo "test box not on screen yet (try $i)"; grep -o 'text="[^"]*"' smoke/ui0.xml | head -5
+  adb exec-out screencap -p > smoke/no_box_$i.png
+  sleep 5
+done
+[ -n "$B" ] || { echo "no test box found"; exit 1; }
 set -- $B
 adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 sleep 4
