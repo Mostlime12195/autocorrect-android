@@ -42,7 +42,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
         if (savedInstanceState == null) supportFragmentManager.beginTransaction().replace(R.id.prefs, Fragment()).commit()
         supportFragmentManager.addOnBackStackChangedListener {
             supportActionBar?.setDisplayHomeAsUpEnabled(supportFragmentManager.backStackEntryCount > 0)
-            if (supportFragmentManager.backStackEntryCount == 0) supportActionBar?.title = getString(R.string.app_name)
+            if (supportFragmentManager.backStackEntryCount == 0) supportActionBar?.title = getString(R.string.settings_title)
         }
     }
 
@@ -194,7 +194,7 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                 if (text.isNullOrBlank() || text!!.contains(".invalid")) text = Prefs.DEFAULT_UPLOAD_URL
                 summaryProvider = Preference.SummaryProvider<androidx.preference.EditTextPreference> { app.prefs.uploadUrl }
             }
-            findPreference<Preference>("version")?.summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+            findPreference<Preference>("version")?.summary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}), preview"
             findPreference<Preference>("check_updates")?.setOnPreferenceClickListener { checkUpdates(manual = true); true }
             findPreference<Preference>("update_banner")?.setOnPreferenceClickListener { Updater.pending()?.let { installUpdate(it) }; true }
             showUpdate()

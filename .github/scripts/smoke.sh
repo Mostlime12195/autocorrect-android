@@ -77,8 +77,10 @@ adb shell uiautomator dump /sdcard/ui.xml >/dev/null
 adb pull /sdcard/ui.xml smoke/ui1.xml >/dev/null
 TEXT=$(grep -o 'text="[^"]*" resource-id="dev.mostlime.autocorrect:id/try_it"' smoke/ui1.xml | sed 's/text="\([^"]*\)".*/\1/')
 echo "typed text: '$TEXT'"
+# suggest-only is the default mode: the first sentences must keep their typos
+case "$TEXT" in *"wrold thsi"*) echo "OK: default (suggest-only) left the typos as typed";; *) echo "WARN: default-mode text changed or missing";; esac
 
-# suggest-only mode: switch it in settings, type typos, the text must stay exactly as typed (typos underlined)
+# auto-correct mode: switch it in settings, type typos, they should be fixed
 tap_text() {  # tap the first UI element whose text starts with $1 (scrolling the settings list down to find it)
   for i in 1 2 3 4 5 6 7 8; do
     adb shell uiautomator dump /sdcard/ui.xml >/dev/null; adb pull /sdcard/ui.xml smoke/ui_s.xml >/dev/null
@@ -92,7 +94,7 @@ adb shell input keyevent KEYCODE_BACK; sleep 2
 # settings are in sub-screens: Correction -> Correction mode (the test box stays above them)
 tap_text "Correction" && sleep 2
 if tap_text "Correction mode"; then
-  sleep 2; tap_text "Suggest only" && echo "suggest-only mode on"; sleep 2
+  sleep 2; tap_text "Auto-correct" && echo "auto-correct mode on"; sleep 2
   for i in 1 2 3 4 5 6 7 8; do adb shell input swipe $((W / 2)) $((H / 3)) $((W / 2)) $((H * 3 / 4)) 200; done
   sleep 1
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null; adb pull /sdcard/ui.xml smoke/ui2.xml >/dev/null
@@ -115,11 +117,11 @@ for c in "i wnat to go hoem now ":
 PY
   while read X Y; do adb shell input tap $X $Y < /dev/null; sleep 0.4; done < smoke/taps2.txt
   sleep 20
-  adb exec-out screencap -p > smoke/suggest_only.png
+  adb exec-out screencap -p > smoke/auto_correct.png
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null; adb pull /sdcard/ui.xml smoke/ui3.xml >/dev/null
   TEXT2=$(grep -o 'text="[^"]*" resource-id="dev.mostlime.autocorrect:id/try_it"' smoke/ui3.xml | sed 's/text="\([^"]*\)".*/\1/')
-  echo "suggest-only text: '$TEXT2'"
-  case "$TEXT2" in *"wnat to go hoem"*) echo "OK: suggest-only left the typos as typed";; *) echo "WARN: suggest-only text changed or missing";; esac
+  echo "auto-correct text: '$TEXT2'"
+  case "$TEXT2" in *"want to go home"*) echo "OK: auto-correct fixed the typos";; *) echo "WARN: auto-correct text not fixed or missing";; esac
 fi
 
 

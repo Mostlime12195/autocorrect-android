@@ -28,13 +28,14 @@ class Prefs(private val ctx: Context) {
     val autocorrect get() = sp.getBoolean(AUTOCORRECT, true)
     /** sentence-start capitals (auto-shift + the corrector's sentence capitals) */
     val autoCap get() = sp.getBoolean(AUTO_CAP, true)
-    /** "suggest" = never edit the text, only underline likely typos and suggest fixes */
-    val suggestOnly get() = sp.getString(CORRECTION_MODE, "auto") == "suggest"
+    /** "suggest" (the default) = never edit the text, only underline likely typos and suggest fixes; "auto" = auto-correct */
+    val correctionMode get() = correctionModeOf(sp.getString(CORRECTION_MODE, null))
+    val suggestOnly get() = correctionMode == "suggest"
     val confidentOnly get() = sp.getBoolean(CONFIDENT_ONLY, false)
     /** "Flag likely typos": until the user sets it, on in suggest-only mode and off in auto-correct mode */
     /** suggest-only "teh → the" pill (the switch shows only when Keylime is the system spell checker) */
     val fixPill get() = sp.getBoolean(FIX_PILL, true)
-    val flagTypos get() = if (sp.contains(FLAG_TYPOS)) sp.getBoolean(FLAG_TYPOS, true) else suggestOnly
+    val flagTypos get() = flagTyposOf(if (sp.contains(FLAG_TYPOS)) sp.getBoolean(FLAG_TYPOS, true) else null, suggestOnly)
     val swipe get() = sp.getBoolean(SWIPE, true)
     val clipboard get() = sp.getBoolean(CLIPBOARD, true)
     val numberRow get() = sp.getBoolean(NUMBER_ROW, false)
@@ -157,6 +158,13 @@ class Prefs(private val ctx: Context) {
         const val REWIND = "rewind"
         const val AUTO_CAP = "auto_cap"
         const val CORRECTION_MODE = "correction_mode"
+        /** the mode for users who never picked one (must match prefs_correction.xml's defaultValue) */
+        const val DEFAULT_CORRECTION_MODE = "suggest"
+        val CORRECTION_MODES = listOf("auto", "suggest")
+        /** a stored mode, or the default when there's none (or an unknown value) */
+        fun correctionModeOf(stored: String?): String = stored?.takeIf { it in CORRECTION_MODES } ?: DEFAULT_CORRECTION_MODE
+        /** "Flag likely typos": the user's choice, else on in suggest-only (the only feedback that mode gives) and off in auto-correct */
+        fun flagTyposOf(stored: Boolean?, suggestOnly: Boolean): Boolean = stored ?: suggestOnly
         const val CONFIDENT_ONLY = "confident_only"
         const val FLAG_TYPOS = "flag_typos"
         const val FIX_PILL = "fix_pill"

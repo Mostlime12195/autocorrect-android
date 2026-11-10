@@ -1,4 +1,6 @@
-# Keylime keyboard (Android)
+# Keylime keyboard (Android), preview
+
+Keylime and its models are a preview, released to show what they can do and to gather feedback and data.
 
 **Install:** grab the APK from the [latest release](https://github.com/Mostlime12195/keylime-android/releases/latest)
 (arm64, Android 8+), open it, then enable Keylime in Settings → System → Keyboard. It updates itself from then on.
@@ -31,7 +33,8 @@ re-check of the previous word) on onnxruntime-android, fed with **real touch coo
   apostrophes "im" → "i'm", g-drops), with the per-kind penalties from `web/site/params_v2.json`. camelCase tokens are
   never split or merged. The **formal** style also adds sentence capitals, i → I and punctuation after the previous
   word (end-of-message punctuation is not done yet).
-- Correction mode: **Auto-correct** (default) or **Suggest only (never edit my text)**. Suggest-only never changes
+- Correction mode: **Suggest only (never edit my text)** (default; a mode you picked earlier is kept) or
+  **Auto-correct**. Suggest-only never changes
   committed text (no late corrections, re-checks, rewinds, capitals or punctuation): a likely typo (model choice !=
   typed word and the fix beats it by `KeyboardController.FLAG_MARGIN`, 1.5) is committed with a `SuggestionSpan`
   (misspelled + easy-correct, top fixes) so apps that support it show the red underline and their tap-to-fix menu, and the
@@ -103,8 +106,8 @@ In the Autocorrect app:
 ## Models and download
 
 Models are not in the APK or in this repo. Each model has its own public Hugging Face repo:
-[MostLime/keylime-m2](https://huggingface.co/MostLime/keylime-m2) (106M, default) and
-[MostLime/keylime-m1](https://huggingface.co/MostLime/keylime-m1) (34M, battery saver), mirrored on Nest. On first run
+[MostLime/keylime-m2-preview](https://huggingface.co/MostLime/keylime-m2-preview) (106M, default) and
+[MostLime/keylime-m1-preview](https://huggingface.co/MostLime/keylime-m1-preview) (34M, battery saver), mirrored on Nest. On first run
 the app fetches `https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json` (fallback: the copy in the
 `models-v1` release of [Mostlime12195/keylime-models](https://github.com/Mostlime12195/keylime-models)), which lists each
 model's files with size and SHA-256 and the mirrors to download from: the model's own `base_urls` (its HF
@@ -211,4 +214,4 @@ ORT tests).
 
 ## License
 
-Code: MIT (see `LICENSE`). Model weights on Hugging Face ([keylime-m2](https://huggingface.co/MostLime/keylime-m2), [keylime-m1](https://huggingface.co/MostLime/keylime-m1)): CC BY 4.0. Icons: Material Symbols (Apache 2.0).
+Code: MIT (see `LICENSE`). Model weights on Hugging Face ([keylime-m2-preview](https://huggingface.co/MostLime/keylime-m2-preview), [keylime-m1-preview](https://huggingface.co/MostLime/keylime-m1-preview)): CC BY 4.0. Icons: Material Symbols (Apache 2.0).

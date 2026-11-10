@@ -44,8 +44,8 @@ class ManifestTest {
 
     @Test fun bundledManifestUsesHuggingFaceThenNest() {
         val m = bundled()
-        val hf = mapOf("m2s_int4" to "https://huggingface.co/MostLime/keylime-m2/resolve/main/",
-            "block4" to "https://huggingface.co/MostLime/keylime-m1/resolve/main/")
+        val hf = mapOf("m2s_int4" to "https://huggingface.co/MostLime/keylime-m2-preview/resolve/main/",
+            "block4" to "https://huggingface.co/MostLime/keylime-m1-preview/resolve/main/")
         for ((id, repo) in hf) {
             val spec = m.model(id)!!
             assertEquals(id, listOf(repo, nest), spec.baseUrls)

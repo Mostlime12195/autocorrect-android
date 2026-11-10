@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+        <Preference app:key="preview" app:title="Preview" app:selectable="false" app:iconSpaceReserved="false"
+            app:summary="Keylime and its models are a preview, released to show what they can do and to gather feedback and data. Expect rough edges." />
         <Preference app:key="version" app:title="Version" app:selectable="false" app:iconSpaceReserved="false" />
         <Preference app:key="copy_diag" app:title="Copy diagnostics" app:summary="Keyboard size and inset numbers, device and version, for a bug report" app:iconSpaceReserved="false" />
         <Preference app:key="licenses" app:title="Open-source licenses" app:selectable="false" app:iconSpaceReserved="false"
-            app:summary="Icons: Material Symbols by Google, Apache License 2.0 (github.com/google/material-design-icons).\nonnxruntime: MIT License (Microsoft). AndroidX, Material Components, Kotlin, kotlinx: Apache License 2.0.\nEmoji data: Unicode emoji-test.txt, © Unicode, Inc., Unicode License v3.\nModels and lexicon: CC BY 4.0. Models at huggingface.co/MostLime/keylime-m2 and huggingface.co/MostLime/keylime-m1." />
+            app:summary="Icons: Material Symbols by Google, Apache License 2.0 (github.com/google/material-design-icons).\nonnxruntime: MIT License (Microsoft). AndroidX, Material Components, Kotlin, kotlinx: Apache License 2.0.\nEmoji data: Unicode emoji-test.txt, © Unicode, Inc., Unicode License v3.\nModels (preview) and lexicon: CC BY 4.0. Models at huggingface.co/MostLime/keylime-m2-preview and huggingface.co/MostLime/keylime-m1-preview." />
 
 </PreferenceScreen>

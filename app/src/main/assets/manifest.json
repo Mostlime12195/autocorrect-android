@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "updated": "2026-11-10T01:11:32Z",
+ "updated": "2026-11-10T04:53:39Z",
  "base_url": "https://autocorrect.mostlime.hackclub.app/autocorrect-android/",
  "base_urls": [
   "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
@@ -10,10 +10,10 @@
  "models": [
   {
    "id": "m2s_int4",
-   "label": "m2 106M int4",
+   "label": "m2 106M int4 (Preview)",
    "format": "ort",
    "base_urls": [
-    "https://huggingface.co/MostLime/keylime-m2/resolve/main/",
+    "https://huggingface.co/MostLime/keylime-m2-preview/resolve/main/",
     "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
    ],
    "graph": {
@@ -176,10 +176,10 @@
   },
   {
    "id": "block4",
-   "label": "m1 34M int8",
+   "label": "m1 34M int8 (Preview)",
    "format": "ort",
    "base_urls": [
-    "https://huggingface.co/MostLime/keylime-m1/resolve/main/",
+    "https://huggingface.co/MostLime/keylime-m1-preview/resolve/main/",
     "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
    ],
    "graph": {

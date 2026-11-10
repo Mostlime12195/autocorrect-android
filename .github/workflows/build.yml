@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MODEL_HOST: https://huggingface.co/MostLime/keylime-m1/resolve/main
+  MODEL_HOST: https://huggingface.co/MostLime/keylime-m1-preview/resolve/main
 
 jobs:
   build:
