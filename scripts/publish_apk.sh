@@ -1,7 +1,7 @@
 #!/bin/bash
 # Publish a release APK for the in-app updater (run after every release):
 #  - the APK goes to the PUBLIC models repo as release app-v<v> (never "latest", the models release keeps that):
-#    https://github.com/Mostlime12195/autocorrect-models/releases/download/app-v<v>/autocorrect-<v>.apk
+#    https://github.com/Mostlime12195/keylime-models/releases/download/app-v<v>/autocorrect-<v>.apk
 #    (Nest's proxy streams big files chunked without Content-Length, and downloads stall on phones)
 #  - latest.json (small) goes to Nest: https://autocorrect.mostlime.hackclub.app/autocorrect-android/latest.json
 # Usage: scripts/publish_apk.sh v0.1.49
@@ -9,8 +9,8 @@ set -euo pipefail
 TAG="${1:?usage: $0 <tag>}"
 V="${TAG#v}"
 CODE="${V##*.}"
-REPO=Mostlime12195/autocorrect-android
-PUB=Mostlime12195/autocorrect-models
+REPO=Mostlime12195/keylime-android
+PUB=Mostlime12195/keylime-models
 HOST=mostlime@hackclub.app
 DIR=/var/www/autocorrect-android
 BASE=https://autocorrect.mostlime.hackclub.app/autocorrect-android

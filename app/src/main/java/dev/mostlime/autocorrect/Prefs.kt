@@ -62,6 +62,8 @@ class Prefs(private val ctx: Context) {
         get() = sp.getLong(STATS_RESET, 0L)
         set(v) = sp.edit().putLong(STATS_RESET, v).apply()
     val share get() = sp.getBoolean(SHARE, false)
+    /** "Include sentence context": its own opt-in, off by default, and only ever on while sharing is on */
+    val shareContext get() = share && sp.getBoolean(SHARE_CONTEXT, false)
     val wifiOnly get() = sp.getBoolean(WIFI_ONLY, true)
     /** the custom URL from settings, else the default (older builds saved the example.invalid placeholder: ignored) */
     val uploadUrl get() = (sp.getString(UPLOAD_URL, null) ?: "").trim().takeUnless { it.isBlank() || it.contains(".invalid") } ?: DEFAULT_UPLOAD_URL
@@ -177,6 +179,7 @@ class Prefs(private val ctx: Context) {
         const val HAPTIC_STRENGTH = "haptic_strength"
         const val STATS_RESET = "stats_reset_at"
         const val SHARE = "share_data"
+        const val SHARE_CONTEXT = "share_context"
         const val WIFI_ONLY = "upload_wifi_only"
         const val UPLOAD_URL = "upload_url"
         const val MANIFEST_URL = "manifest_url"
@@ -218,7 +221,7 @@ class Prefs(private val ctx: Context) {
         /** Collection endpoint (autocorrect repo collect/API.md); only used when sharing is switched on. */
         const val DEFAULT_UPLOAD_URL = "https://autocorrect.mostlime.hackclub.app/api/v1/upload"
         val DEFAULT_MANIFEST_URLS = listOf(
-            "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-v1/manifest.json",
+            "https://github.com/Mostlime12195/keylime-models/releases/download/models-v1/manifest.json",
             "https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json",
         )
         val STYLES = listOf("casual", "standard", "formal")

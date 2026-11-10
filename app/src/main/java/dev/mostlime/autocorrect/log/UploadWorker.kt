@@ -21,7 +21,7 @@ import java.net.URI
 import java.util.concurrent.TimeUnit
 
 /**
- * Opt-in upload of the correction queue ("Share correction data", off by default): batched POST of the scrubbed v2
+ * Opt-in upload of the correction queue ("Share correction data", off by default): batched POST of the scrubbed
  * events queued since the last successful upload (App.corrections, schema in DATA.md / docs/upload-schema.md). The
  * local event log is never uploaded. Runs via WorkManager every 6 hours, Wi-Fi only by default. Pending server-side
  * deletes ("Delete my uploaded data" that couldn't reach the server) go first, before any upload, and also run when
@@ -49,7 +49,7 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         if (URI(url).host?.endsWith(".invalid") != false) return@withContext Result.success()
         val d = UploadClient.drain(prefs.corrUploadOffset, BATCH_EVENTS,
             read = { from, n -> app.corrections.readFrom(from, n, BATCH_BYTES) },
-            send = { lines -> UploadClient.post(url, UploadClient.envelope(prefs.installId, BuildConfig.VERSION_NAME, lines)) },
+            send = { lines -> UploadClient.post(url, UploadClient.envelope(prefs.installId, BuildConfig.VERSION_NAME, lines, prefs.shareContext)) },
             commit = { prefs.corrUploadOffset = it },
             log = { Log.w(TAG, it) })
         Log.i(TAG, "uploaded ${d.sent} events, skipped ${d.skipped}")

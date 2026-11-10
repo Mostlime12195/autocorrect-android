@@ -3,7 +3,7 @@
  "updated": "2026-11-09T01:09:51Z",
  "base_url": "https://autocorrect.mostlime.hackclub.app/autocorrect-android/",
  "base_urls": [
-  "https://github.com/Mostlime12195/autocorrect-models/releases/download/models-style1/",
+  "https://github.com/Mostlime12195/keylime-models/releases/download/models-style1/",
   "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
  ],
  "default": "m2s_int4",

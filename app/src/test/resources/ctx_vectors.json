@@ -1,0 +1,346 @@
+[
+ {
+  "left": "I think we should meet at ",
+  "right": " tomorrow morning if that works.",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "I think we should meet at",
+  "after": "tomorrow morning if that works."
+ },
+ {
+  "left": "First sentence here. And then I went to ",
+  "right": " store. Another one follows.",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "And then I went to",
+  "after": "store."
+ },
+ {
+  "left": "line one\nsecond line with ",
+  "right": " words\nthird line",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "second line with",
+  "after": "words"
+ },
+ {
+  "left": "Done! ",
+  "right": " is new",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "",
+  "after": "is new"
+ },
+ {
+  "left": "He asked why? Because ",
+  "right": " said so! Really.",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "Because",
+  "after": "said so!"
+ },
+ {
+  "left": "wait... then ",
+  "right": " happened",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "then",
+  "after": "happened"
+ },
+ {
+  "left": "She said \"stop.\" Then ",
+  "right": " left (quickly).",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "Then",
+  "after": "left (quickly)."
+ },
+ {
+  "left": "end of it ",
+  "right": ". Next sentence starts",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "end of it",
+  "after": ""
+ },
+ {
+  "left": "a list of ",
+  "right": ", second, third",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "a list of",
+  "after": "second, third"
+ },
+ {
+  "left": "he said \"",
+  "right": "\" and left",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "he said",
+  "after": "and left"
+ },
+ {
+  "left": "it was a well-",
+  "right": " thing to do",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "it was a",
+  "after": "thing to do"
+ },
+ {
+  "left": "call me at 555 123 4567 or ",
+  "right": " 12:30 pm",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "call me at <num> or",
+  "after": "<num> pm"
+ },
+ {
+  "left": "send $5.00 to bob@example.com about ",
+  "right": " at https://example.com/x?y=1 ok",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "send <num> to <email> about",
+  "after": "at <url> ok"
+ },
+ {
+  "left": "see www.example.org and example.com/path for ",
+  "right": " info",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "see <url> and <url> for",
+  "after": "info"
+ },
+ {
+  "left": "ask @lime or #general about ",
+  "right": " @",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "ask <handle> or <handle> about",
+  "after": ""
+ },
+ {
+  "left": "my code is A1B2C3 and the key sk_live_abcdef for ",
+  "right": " access",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "my code is <tok> and the key <tok> for",
+  "after": "access"
+ },
+ {
+  "left": "token dGhpcyBpcyBh and ABCD-EFGH-IJKL then ",
+  "right": " xkcdqwrt bye",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "token <tok> and <tok> then",
+  "after": "<tok> bye"
+ },
+ {
+  "left": "pneumonoultramicroscopicsilicovolcanoconiosis is ",
+  "right": " long",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "<tok> is",
+  "after": "long"
+ },
+ {
+  "left": "the caf\u00e9 na\u00efve r\u00e9sum\u00e9 ",
+  "right": " \u00fcber stra\u00dfe",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "the caf\u00e9 na\u00efve r\u00e9sum\u00e9",
+  "after": "\u00fcber stra\u00dfe"
+ },
+ {
+  "left": "emoji \ud83d\ude00 here and a_b plus c/d ",
+  "right": " x=y 50% #1",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "emoji <tok> here and <tok> plus <tok>",
+  "after": ""
+ },
+ {
+  "left": "1 2 3 ",
+  "right": " 4 5",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "",
+  "after": ""
+ },
+ {
+  "left": "12 34 ",
+  "right": "",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "",
+  "after": ""
+ },
+ {
+  "left": "",
+  "right": "",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "",
+  "after": ""
+ },
+ {
+  "left": "   ",
+  "right": "   ",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "",
+  "after": ""
+ },
+ {
+  "left": "e.g. this ",
+  "right": " i.e. that",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "this",
+  "after": "i.e."
+ },
+ {
+  "left": "Mr. Smith went to ",
+  "right": " U.S.A today",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "Smith went to",
+  "after": "U.S.A today"
+ },
+ {
+  "left": "McDonald's and JavaScript iPhone ",
+  "right": " OK HELLO",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "McDonald's and JavaScript iPhone",
+  "after": "OK HELLO"
+ },
+ {
+  "left": "it's the user\u2019s \u201cquoted\u201d thing \u2014 really ",
+  "right": " \u2013 yes; no: maybe (ok) & more\u2026 after",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "it's the user\u2019s \u201cquoted\u201d thing \u2014 really",
+  "after": "\u2013 yes; no: maybe (ok) & more\u2026"
+ },
+ {
+  "left": "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix ",
+  "right": " a b c d e f g h i j k l m n o",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix",
+  "after": "a b c d e f g h i j k l"
+ },
+ {
+  "left": "rtial word then some more words ",
+  "right": " and the tail is cut he",
+  "left_truncated": true,
+  "right_truncated": true,
+  "before": "word then some more words",
+  "after": "and the tail is cut"
+ },
+ {
+  "left": "lf. Then a full sentence with ",
+  "right": " in it. And mo",
+  "left_truncated": true,
+  "right_truncated": true,
+  "before": "Then a full sentence with",
+  "after": "in it."
+ },
+ {
+  "left": "cut\nnew line start ",
+  "right": " end of line\nne",
+  "left_truncated": true,
+  "right_truncated": true,
+  "before": "new line start",
+  "after": "end of line"
+ },
+ {
+  "left": "tabs\tand  double   spaces ",
+  "right": "\tmore\u00a0here",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "tabs and double spaces",
+  "after": "more here"
+ },
+ {
+  "left": "windows line\r\nnext ",
+  "right": " rest\r\nafter",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "next",
+  "after": "rest"
+ },
+ {
+  "left": "2nd place at 3pm on the 1st ",
+  "right": " v2 h4x0r",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "<tok> place at <tok> on the <tok>",
+  "after": ""
+ },
+ {
+  "left": "password is hunter2 and pin 4821 so ",
+  "right": " now",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "password is <tok> and pin <num> so",
+  "after": "now"
+ },
+ {
+  "left": "hmmmmm pssst rhythm ",
+  "right": " brrrrr",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "<tok> pssst rhythm",
+  "after": ""
+ },
+ {
+  "left": "visit file.txt or end.Next ",
+  "right": " a.b",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "visit <url> or <url>",
+  "after": "a.b"
+ },
+ {
+  "left": "me@ @ # a@b ",
+  "right": " x",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "",
+  "after": "x"
+ },
+ {
+  "left": "\u00bfD\u00f3nde est\u00e1 el ",
+  "right": " grande? No s\u00e9.",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "\u00bfD\u00f3nde est\u00e1 el",
+  "after": "grande?"
+ },
+ {
+  "left": "\u4eca\u65e5\u306f\u3002 hello ",
+  "right": " world\u3002 next",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "hello",
+  "after": ""
+ },
+ {
+  "left": "--- ---- ",
+  "right": " ... more",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "",
+  "after": ""
+ },
+ {
+  "left": "<num> <email> already ",
+  "right": " <tok> here",
+  "left_truncated": false,
+  "right_truncated": false,
+  "before": "<tok> <tok> already",
+  "after": "<tok> here"
+ }
+]

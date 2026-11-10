@@ -1,6 +1,6 @@
 # Keylime keyboard (Android)
 
-**Install:** grab the APK from the [latest release](https://github.com/Mostlime12195/autocorrect-android/releases/latest)
+**Install:** grab the APK from the [latest release](https://github.com/Mostlime12195/keylime-android/releases/latest)
 (arm64, Android 8+), open it, then enable Keylime in Settings → System → Keyboard. It updates itself from then on.
 
 A QWERTY keyboard (Android `InputMethodService`) whose autocorrect is the tiny on-device language model from the
@@ -103,12 +103,12 @@ In the Autocorrect app:
 ## Models and download
 
 Models are not in the APK or in this repo. They are release assets of the public repo
-[Mostlime12195/autocorrect-models](https://github.com/Mostlime12195/autocorrect-models) (tag `models-v1`). On first run the app fetches that release's `manifest.json`
+[Mostlime12195/keylime-models](https://github.com/Mostlime12195/keylime-models) (tag `models-v1`). On first run the app fetches that release's `manifest.json`
 (fallback: `https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json`), which lists each model's files
 with size and SHA-256 and the mirrors to download from, and downloads the active model's files into app-private storage
 with WorkManager (progress in settings). A file is used only after its SHA-256 matches. A copy of the manifest is
 bundled (`app/src/main/assets/manifest.json`) as the fallback. A new model only needs new assets + manifest, no new APK:
-`gh release upload models-v1 --clobber -R Mostlime12195/autocorrect-models <files> manifest.json`.
+`gh release upload models-v1 --clobber -R Mostlime12195/keylime-models <files> manifest.json`.
 
 Model files are **pre-optimized ORT format** (`.ort`), made on an arm64 host by `android_export/to_ort.py` in the
 autocorrect repo (all graph optimizations applied at conversion, int4 `DequantizeLinear+MatMul` fused to `MatMulNBits`
@@ -152,17 +152,23 @@ model (σ = 0.3 key widths) sees real touch positions. The bottom row's space ba
 
 - Always logged locally (app-private JSONL, `files/events/events.jsonl`, rotated at 8 MB): every correction with typed
   word, touches, candidates + scores, chosen / final word, outcome (accepted / undone / strip pick), style, model,
-  timestamp, and up to 120 characters of left context; timing-only events for unchanged words. Settings has **Export**
+  timestamp, and up to 240 characters of left context; timing-only events for unchanged words. Settings has **Export**
   (share sheet) and **Clear local data**.
 - Never logged, learned from or uploaded: anything typed in password, incognito, email, URI, number, phone or date
   fields. Autocorrect is off in password / email / URI / number / phone fields and when the field asks for no
   suggestions.
-- **Share typing data to improve autocorrect** is off by default. When on, events logged from then on are uploaded in
+- **Share typing data to improve autocorrect** is off by default. When on, scrubbed word-level correction events made
+  from then on are uploaded in
   batches (WorkManager, about every 6 h, Wi-Fi only by default) to `https://autocorrect.mostlime.hackclub.app/api/v1/upload`
   under a random install ID. 2xx advances; 429 / 5xx / network errors retry (honoring `Retry-After`); 413 halves the
   batch; other 4xx skip the batch. **Delete my uploaded data** calls `DELETE /api/v1/install/{id}`, clears the local log
   and starts a new install ID (a failed call is retried by the worker before any upload). Request format:
   [docs/upload-schema.md](docs/upload-schema.md); server API: `collect/API.md` in the autocorrect repo.
+- **Include sentence context** is a second switch under it, also off by default and only usable while sharing is on:
+  it also sends the sentence around each correction (at most 24 words before and 12 after, same line, numbers /
+  emails / links / @names / codes replaced by placeholders on the phone first). Never from name, address, filter or
+  no-suggestion fields; nothing at all is uploaded from password managers, authenticators and terminals. Turning it
+  off strips the sentences from the queue. The server deletes uploaded events after 90 days.
 - App data is excluded from Android backups.
 
 ## Build and CI
@@ -200,4 +206,4 @@ ORT tests).
 
 ## License
 
-Code: MIT (see `LICENSE`). Model weights in [autocorrect-models](https://github.com/Mostlime12195/autocorrect-models): CC BY 4.0. Icons: Material Symbols (Apache 2.0).
+Code: MIT (see `LICENSE`). Model weights in [keylime-models](https://github.com/Mostlime12195/keylime-models): CC BY 4.0. Icons: Material Symbols (Apache 2.0).

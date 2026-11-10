@@ -43,8 +43,8 @@ class UploadClientTest {
     @Test fun envelopeIsValidJson() {
         val lines = listOf(EventLog.toJson(mapOf("v" to 2, "id" to "abcdefgh", "typed" to "te\"h", "x" to listOf(1.5, null))).toString())
         val o = Json.parseToJsonElement(UploadClient.envelope("id", "0.1.1", lines)).jsonObject
-        assertEquals("autocorrect-events/2", o["schema"]!!.jsonPrimitive.content)
-        assertEquals(setOf("schema", "install_id", "app_version", "events"), o.keys)   // v2 has no sent_at
+        assertEquals("autocorrect-events/3", o["schema"]!!.jsonPrimitive.content)
+        assertEquals(setOf("schema", "install_id", "app_version", "events"), o.keys)   // no sent_at since v2
         assertEquals(1, o["events"]!!.jsonArray.size)
     }
 
@@ -80,7 +80,7 @@ class UploadClientTest {
     }
 
     /**
-     * Against the live collection server (AC_LIVE_UPLOAD=1): v2 events made by the real KeyboardController +
+     * Against the live collection server (AC_LIVE_UPLOAD=1): v3 events made by the real KeyboardController +
      * CorrectionLog, serialized like the queue, in the worker's envelope -> all accepted by the server's strict
      * validation, deduped on retry, the server's 4xx codes map to the right action, and DELETE removes everything.
      */
@@ -89,15 +89,17 @@ class UploadClientTest {
         val ed = KeyboardControllerTest.FakeEditor()
         val engine = KeyboardControllerTest.SlowEngine()
         val events = ArrayList<Map<String, Any?>>()
-        val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ events.add(it) }, { false })
+        // with the sentence-context opt-in on, so the server's v3 checks see what the real scrubber makes
+        val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ events.add(it) }, { false }, context = { true })
         val ctl = KeyboardController({ ed }, engine, object : ControllerUi {
             override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
             override fun setShift(shift: Shift) {}
             override fun onResult(r: WordResult?) {}
         }, KeyboardControllerTest.ManualTimer(), corrections = corrections) {}
         ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "m2s_int4" }, "0.0.0-test"))
-        for (c in "teh quick brown fox is it fized ") {
-            val k = if (c == ' ') KeyboardLayout.LETTERS.keys.first { it.type == KeyType.SPACE } else KeyboardLayout.LETTERS.keys.first { it.text == c.toString() }
+        for (c in "call me at 5551234 or teh quick brown fox is it fized ") {
+            val k = if (c == ' ') KeyboardLayout.LETTERS.keys.first { it.type == KeyType.SPACE } else KeyboardLayout.LETTERS.keys.firstOrNull { it.text == c.toString() }
+                ?: dev.mostlime.autocorrect.ime.KeyDef(c.toString(), c.toString(), KeyType.CHAR, 0f, 1f, 0)   // digits
             ctl.key(k, KeyGeom.center(c) ?: Touch.APOS)
             ctl.selectionChanged()
             engine.deliver(engine.queue.size)
@@ -106,11 +108,13 @@ class UploadClientTest {
         val lines = events.map { EventLog.toJson(it).toString() }
         println("events: ${lines.size}\n${lines.joinToString("\n")}")
         assertTrue(lines.any { "\"type\":\"correction\"" in it })
+        assertTrue(lines.any { "\"ctx_before\"" in it })
+        assertTrue(lines.none { "555" in it })
 
         val id = UUID.randomUUID().toString()
         println("install_id $id")
         val url = Prefs.DEFAULT_UPLOAD_URL
-        fun up(lines: List<String>, install: String = id) = UploadClient.post(url, UploadClient.envelope(install, "0.0.0-test", lines))
+        fun up(lines: List<String>, install: String = id) = UploadClient.post(url, UploadClient.envelope(install, "0.0.0-test", lines, context = true))
         try {
             val r1 = up(lines)
             println("upload: ${r1.code} ${r1.body}")

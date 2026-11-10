@@ -26,16 +26,20 @@ object UploadClient {
     }
 
     /**
-     * Upload envelope (schema autocorrect-events/2: exactly schema, install_id, app_version, events). The events are
-     * the queue's JSON lines as they are (each one already scrubbed and checked by CorrectionLog).
+     * Upload envelope (schema autocorrect-events/3: exactly schema, install_id, app_version, events). The events are
+     * the queue's JSON lines as they are (each one already scrubbed and checked by CorrectionLog), except that sentence
+     * context is taken out again unless "Include sentence context" is on right now ([context]).
      */
-    fun envelope(installId: String, appVersion: String, lines: List<String>): String =
+    fun envelope(installId: String, appVersion: String, lines: List<String>, context: Boolean = false): String =
         JsonObject(mapOf(
             "schema" to JsonPrimitive("autocorrect-events/${EventLog.SCHEMA}"),
             "install_id" to JsonPrimitive(installId),
             "app_version" to JsonPrimitive(appVersion),
-            "events" to JsonArray(lines.mapNotNull { runCatching { Json.parseToJsonElement(it) }.getOrNull() }),
+            "events" to JsonArray(lines.mapNotNull { runCatching { Json.parseToJsonElement(outgoing(it, context)) }.getOrNull() }),
         )).toString()
+
+    /** a queued line exactly as it is sent (the upload preview shows this) */
+    fun outgoing(line: String, context: Boolean): String = if (context) line else EventLog.withoutContext(line)
 
     class Drained(val sent: Int, val skipped: Int, /** set when it stopped on a retryable error */ val retry: Response?)
 

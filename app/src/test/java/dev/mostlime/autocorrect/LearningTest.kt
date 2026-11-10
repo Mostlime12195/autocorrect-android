@@ -99,9 +99,12 @@ class LearningTest {
     }
     private var session = "s1"
     private var nearCommon = false
-    /** upload events (autocorrect-events/2) */
+    /** upload events (autocorrect-events/3) */
     private val uploads = ArrayList<Map<String, Any?>>()
-    private val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ uploads.add(it) }, learning::inVocab, { user.onProbation(it) })
+    /** the "Include sentence context" opt-in */
+    private var ctxOn = false
+    private val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ uploads.add(it) }, learning::inVocab, { user.onProbation(it) },
+        context = { ctxOn }, ctxWindow = KeyboardController.LOG_CONTEXT_CHARS)
     private val ctl = KeyboardController({ ed }, engine, object : ControllerUi {
         override fun showStrip(words: List<String>, bold: Int, undo: Int) {}
         override fun setShift(shift: Shift) {}
@@ -593,6 +596,62 @@ class LearningTest {
         engine.deliver()
         ctl.finishInput()                                  // left alone until the field closed
         assertEquals("suggestion_ignored", upload("teh")["outcome"])
+    }
+
+    @Test fun uploadSentenceContextOnlyWithItsOwnOptIn() {
+        // off (the default): word-level events only, whatever was typed around the word
+        start()
+        type("so i want teh quick brown fox. ok ")
+        engine.deliver()
+        ctl.finishInput()
+        var e = upload("teh")
+        assertFalse(e.containsKey("ctx_before")); assertFalse(e.containsKey("ctx_after"))
+        assertFalse(uploads.toString(), uploads.toString().contains("brown"))
+
+        // on: the rest of the sentence, scrubbed; nothing from the sentence before or after it
+        uploads.clear(); ed.text.setLength(0); ctxOn = true; start()
+        type("first bit. call me at 5551234 or teh quick brown fox. next one ")
+        engine.deliver()
+        ctl.finishInput()
+        e = upload("teh")
+        assertEquals("auto_applied_kept", e["outcome"])
+        assertEquals("call me at <num> or", e["ctx_before"])
+        assertEquals("quick brown fox.", e["ctx_after"])
+        assertEquals(3, e["v"])
+        assertFalse(uploads.toString(), uploads.toString().contains("555") || uploads.toString().contains("first") || uploads.toString().contains("next"))
+    }
+
+    @Test fun uploadNoContextFromNameFieldsAndNothingFromExcludedApps() {
+        ctxOn = true
+        // a name field: the correction event is fine, the sentence around it is not taken
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME, 0), true, "standard", { "test" }, "t"))
+        type("so i want teh quick brown ")
+        engine.deliver()
+        ctl.finishInput()
+        val e = upload("teh")
+        assertFalse(e.containsKey("ctx_before")); assertFalse(e.containsKey("ctx_after"))
+
+        // a password manager / terminal: no event at all, even from a plain text field
+        uploads.clear(); ed.text.setLength(0)
+        for (pkg in listOf("com.x8bit.bitwarden", "com.termux")) {
+            ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0, pkg), true, "standard", { "test" }, "t"))
+            type("so i want teh quick brown ")
+            engine.deliver()
+            ctl.finishInput()
+            ed.text.setLength(0)
+        }
+        // incognito (IME_FLAG_NO_PERSONALIZED_LEARNING), number, phone, URL, date fields
+        for ((t, o) in listOf(InputType.TYPE_CLASS_TEXT to android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING,
+            InputType.TYPE_CLASS_NUMBER to 0, InputType.TYPE_CLASS_PHONE to 0, InputType.TYPE_CLASS_DATETIME to 0,
+            (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI) to 0,
+            (InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD) to 0)) {
+            ctl.startInput(ControllerConfig(FieldPolicy.of(t, o), true, "standard", { "test" }, "t"))
+            type("so i want teh quick brown ")
+            engine.deliver()
+            ctl.finishInput()
+            ed.text.setLength(0)
+        }
+        assertTrue(uploads.toString(), uploads.isEmpty())
     }
 
     @Test fun uploadNothingFromPasswordFieldsOrProbationWords() {

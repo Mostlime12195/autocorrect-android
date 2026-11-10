@@ -119,7 +119,19 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
                     }
                     refresh()
                 }
+                // sentence context is its own opt-in: it never comes back on by itself when sharing is switched on again
+                if (on != true) findPreference<androidx.preference.SwitchPreferenceCompat>(Prefs.SHARE_CONTEXT)?.isChecked = false
                 view?.post { UploadWorker.schedule(requireContext(), app.prefs) }
+                true
+            }
+            findPreference<Preference>(Prefs.SHARE_CONTEXT)?.setOnPreferenceChangeListener { _, on ->
+                // switching it off takes the sentences out of everything still queued (the uploader strips them too)
+                if (on != true) lifecycleScope.launch {
+                    withContext(Dispatchers.IO) {
+                        app.prefs.corrUploadOffset = app.corrections.rewrite(app.prefs.corrUploadOffset, dev.mostlime.autocorrect.log.EventLog::withoutContext)
+                    }
+                    refresh()
+                }
                 true
             }
             findPreference<Preference>("upload_preview")?.setOnPreferenceClickListener { showUploadPreview(); true }
@@ -524,14 +536,17 @@ class SettingsActivity : AppCompatActivity(), PreferenceFragmentCompat.OnPrefere
             lifecycleScope.launch {
                 val waiting = withContext(Dispatchers.IO) { app.corrections.readFrom(app.prefs.corrUploadOffset, 10_000, 4 shl 20).first.size }
                 findPreference<Preference>("upload_preview")?.summary =
-                    if (!app.prefs.share) "Sharing is off: nothing is queued" else "$waiting waiting to upload. Tap to see the last 20 queued events, exactly as they will be sent"
+                    if (!app.prefs.share) "Sharing is off: nothing is queued" else "$waiting waiting to upload. Tap to see the last 20 queued events, exactly as they will be sent" +
+                        (if (app.prefs.shareContext) " (with sentence context)" else "")
             }
         }
 
         /** the last ~20 queued upload events, verbatim (one JSON object each) */
         private fun showUploadPreview() {
             lifecycleScope.launch {
-                val lines = withContext(Dispatchers.IO) { app.corrections.tail(20) }
+                // exactly what the uploader sends: without sentence context unless that opt-in is on right now
+                val ctx = app.prefs.shareContext
+                val lines = withContext(Dispatchers.IO) { app.corrections.tail(20) }.map { dev.mostlime.autocorrect.log.UploadClient.outgoing(it, ctx) }
                 val text = if (lines.isEmpty()) {
                     if (app.prefs.share) "Nothing queued yet. Each correction you make while sharing is on shows up here before it's sent."
                     else "Sharing is off, so nothing is queued or sent."

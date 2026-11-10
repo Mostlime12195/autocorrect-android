@@ -15,7 +15,7 @@ import java.util.concurrent.Executors
  * it is rotated to <name>.1.jsonl (the older rotation is dropped) and resetOffset() is called.
  *
  * Two of them: the local event log (filesDir/events/events.jsonl, docs/upload-schema.md; stays on the phone) and the
- * upload queue (filesDir/upload/corrections.jsonl: scrubbed v2 correction events, only written while sharing is on,
+ * upload queue (filesDir/upload/corrections.jsonl: scrubbed correction events, only written while sharing is on,
  * docs/upload-schema.md). The keyboard only writes either for non-sensitive fields (FieldPolicy).
  */
 class EventLog(
@@ -96,6 +96,15 @@ class EventLog(
         out.toList()
     }.get()
 
+    /**
+     * Blocking: rewrite every queued line with [f] (used to drop sentence context when that opt-in is switched off).
+     * offset = a byte offset into the current file; returns where that same line starts after the rewrite.
+     */
+    fun rewrite(offset: Long, f: (String) -> String): Long = io.submit<Long> {
+        if (old.exists()) rewriteFile(old, 0, f)
+        if (file.exists()) rewriteFile(file, offset, f) else 0L
+    }.get()
+
     /** Offset of the end of the log (uploads start here when sharing is switched on: no backfill). */
     fun endOffset(): Long = io.submit<Long> { file.length() }.get()
 
@@ -105,7 +114,33 @@ class EventLog(
         /** the upload queue holds only recent events: uploaded ones go when it rotates */
         const val QUEUE_BYTES = 256L shl 10
         /** upload schema (DATA.md in the autocorrect repo); the local log's own events are v1 and never uploaded */
-        const val SCHEMA = 2
+        const val SCHEMA = 3
+
+        /** rewrite one JSONL file line by line -> the new byte offset of the line that started at [offset] (or the new end) */
+        fun rewriteFile(src: File, offset: Long, f: (String) -> String): Long {
+            val tmp = File(src.parentFile, src.name + ".tmp")
+            var pos = 0L; var out = 0L; var newOffset = -1L
+            tmp.bufferedWriter(Charsets.UTF_8).use { w ->
+                src.useLines { ls ->
+                    for (l in ls) {
+                        if (newOffset < 0 && pos >= offset) newOffset = out
+                        val n = f(l)
+                        w.write(n); w.write("\n")
+                        pos += l.toByteArray(Charsets.UTF_8).size + 1
+                        out += n.toByteArray(Charsets.UTF_8).size + 1
+                    }
+                }
+            }
+            if (!tmp.renameTo(src)) { src.delete(); tmp.renameTo(src) }
+            return if (newOffset < 0) out else newOffset
+        }
+
+        /** an upload event without its sentence context (what is sent while "Include sentence context" is off) */
+        fun withoutContext(line: String): String {
+            if ("\"ctx_" !in line) return line
+            val o = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(line) as? JsonObject }.getOrNull() ?: return line
+            return JsonObject(o.filterKeys { it != "ctx_before" && it != "ctx_after" }).toString()
+        }
 
         /** event map (KeyboardController) -> JSON, as written to the log and uploaded */
         @Suppress("UNCHECKED_CAST")

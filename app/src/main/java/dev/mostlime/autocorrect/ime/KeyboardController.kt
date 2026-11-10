@@ -310,6 +310,7 @@ class KeyboardController(
         flushLast()
         corrections?.flush()
         config = cfg
+        corrections?.fieldContext = !cfg.policy.noContext
         resetWord(); last = null; prev = null; pendings.clear(); compLen = 0; rewound.clear(); rewindUndo = null; deferred.clear()
         typo = null; dictAdded = null; pendingUndo = null; punctTried.clear(); sentenceCache.clear(); flags.clear(); cursorFlag = null
         chipFlag = null; spansDropped = false; marked.clear()
@@ -374,16 +375,18 @@ class KeyboardController(
                     // "word " + "." -> "word. " (the swiped word's auto space moves after the punctuation)
                     flushLast()
                     ed.beginBatch(); ed.deleteBefore(1); ed.commit("$c "); ed.endBatch()
+                    corr()?.between("\b$c ")
                     swipeSpace = true
                     setStrip(emptyList(), -1, StripMode.NONE)
                     autoShift()
                 } else {
                     flushLast()
                     ed.commit(c)
+                    corr()?.between(c)
                     autoShift()
                 }
             }
-            KeyType.SPACE -> if (composing.isNotEmpty()) finishWord(ed, " ", trigger = true) else { flushLast(); ed.commit(" "); autoShift() }
+            KeyType.SPACE -> if (composing.isNotEmpty()) finishWord(ed, " ", trigger = true) else { flushLast(); ed.commit(" "); corr()?.between(" "); autoShift() }
             KeyType.ENTER -> {
                 if (composing.isNotEmpty()) finishWord(ed, "", trigger = true)
                 corr()?.breakChain()
@@ -487,7 +490,7 @@ class KeyboardController(
         composing.toString().takeIf { it.isNotEmpty() && learning.isUserWord(it) }?.let { learning.seenTyped(it) }
         cancelSuggest()
         val typed = composing.toString()
-        if (typed.isNotEmpty()) corr()?.word(typed)
+        if (typed.isNotEmpty()) corr()?.word(typed, sepText)
         val tch = ArrayList(touches)
         val cfg = config
         val canCorrect = trigger && cfg.policy.autocorrect && cfg.autocorrect && WORD_RE.matches(typed) && !keepTypedOnce
@@ -1355,6 +1358,7 @@ class KeyboardController(
         cancelSuggest()
         if (composing.isNotEmpty()) { ed.commit(composing.toString()); resetWord() }
         ed.commit(t)
+        corr()?.breakChain()   // pasted / inserted text isn't a typed word: nothing after it is "the next word"
         prev = null
         setStrip(emptyList(), -1, StripMode.NONE)
         autoShift()
@@ -1486,11 +1490,11 @@ class KeyboardController(
     private fun write(e: Map<String, Any?>) {
         if (config.policy.sensitive) return
         events(e)
-        corrections?.onEvent(e)
+        corr()?.onEvent(e)
     }
 
-    /** the upload log, unless this field is sensitive (password / email / URL / number / incognito ...) */
-    private fun corr(): CorrectionLog? = corrections?.takeIf { !config.policy.sensitive }
+    /** the upload log, unless this field is sensitive (password / email / URL / number / incognito ...) or in an excluded app */
+    private fun corr(): CorrectionLog? = corrections?.takeIf { !config.policy.sensitive && !config.policy.noUpload }
 
     private fun baseEvent(type: String, typed: String, tch: List<Touch>): MutableMap<String, Any?> = linkedMapOf(
         "v" to 1, "id" to UUID.randomUUID().toString(), "ts" to System.currentTimeMillis(), "type" to type,
@@ -1522,7 +1526,8 @@ class KeyboardController(
 
     companion object {
         const val CTX_CHARS = 400
-        const val LOG_CONTEXT_CHARS = 120
+        /** text before a word kept in a local event (also what sentence context is cut from: 24 words fit) */
+        const val LOG_CONTEXT_CHARS = 240
         const val LOG_CANDS = 8
         const val ENTER_HOLD_MS = 400L
         const val FAST_HOLD_MS = 60L

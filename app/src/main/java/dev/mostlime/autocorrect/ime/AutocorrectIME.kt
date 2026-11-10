@@ -261,6 +261,9 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
             sink = { e -> if (app.prefs.share) app.corrections.append(toJson(e) as JsonObject) },
             inVocab = learning::inVocab,
             isProbation = { w -> app.user.onProbation(w) },
+            // the second opt-in (Prefs.shareContext is false unless sharing itself is on)
+            context = { app.prefs.shareContext },
+            ctxWindow = KeyboardController.LOG_CONTEXT_CHARS,
         )
         ctl = KeyboardController({ currentInputConnection?.let { editor } }, engine, ui, timer, learning, corrections) { e ->
             app.events.append(toJson(e) as JsonObject)
