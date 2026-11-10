@@ -42,6 +42,8 @@ class ModelSpec(
     val styleParams: Map<String, DecodeParams>,
     /** cand-gen v2 kind penalties for the formal style (adds caps / punct / comma); params.pen is the default style */
     val penFormal: Map<String, Double> = emptyMap(),
+    /** this model's own mirrors (e.g. its Hugging Face repo, then Nest); tried before the manifest's top-level base_urls */
+    val baseUrls: List<String> = emptyList(),
 ) {
     fun styleToken(style: String): Int? = if (supportsStyle) styleTokens[style] else null
     fun paramsFor(style: String): DecodeParams {
@@ -55,6 +57,9 @@ class ModelSpec(
 
 class Manifest(val schema: Int, val updated: String, val baseUrls: List<String>, val default: String, val batterySaver: String, val models: List<ModelSpec>) {
     fun model(id: String) = models.firstOrNull { it.id == id }
+
+    /** Mirrors for a model's files, in the order they're tried: the model's own base_urls, then the top-level ones. */
+    fun mirrors(spec: ModelSpec): List<String> = (spec.baseUrls + baseUrls).filter { it.isNotBlank() }.distinct()
 
     companion object {
         fun parse(text: String): Manifest {
@@ -90,12 +95,13 @@ class Manifest(val schema: Int, val updated: String, val baseUrls: List<String>,
                     styleTokens = m["style_tokens"]?.jsonObject?.mapValues { it.value.jsonPrimitive.intOrNull } ?: emptyMap(),
                     styleParams = m["style_params"]?.jsonObject?.mapValues { dp(it.value.jsonObject) } ?: emptyMap(),
                     penFormal = m["params"]!!.jsonObject["pen_formal"]?.jsonObject?.mapValues { it.value.jsonPrimitive.double } ?: emptyMap(),
+                    baseUrls = m["base_urls"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
                 )
             }
             return Manifest(
                 schema = o["schema"]!!.jsonPrimitive.int,
                 updated = o["updated"]?.jsonPrimitive?.content ?: "",
-                // mirrors, tried in order (e.g. GitHub release assets, then the demo host)
+                // shared mirrors, tried in order after a model's own base_urls (Manifest.mirrors)
                 baseUrls = o["base_urls"]?.jsonArray?.map { it.jsonPrimitive.content } ?: listOf(o["base_url"]!!.jsonPrimitive.content),
                 default = o["default"]!!.jsonPrimitive.content,
                 batterySaver = o["battery_saver"]?.jsonPrimitive?.content ?: o["default"]!!.jsonPrimitive.content,
@@ -109,7 +115,7 @@ class Manifest(val schema: Int, val updated: String, val baseUrls: List<String>,
  * Model files live in app-private storage (filesDir/models). A file counts as installed when it has a matching
  * "<file>.sha256" marker, written only after the download's SHA-256 was verified.
  *
- * The manifest comes from the demo host (Prefs.manifestUrl) and is cached; the copy bundled in the APK
+ * The manifest comes from Nest, with the GitHub models-v1 copy as the fallback (Prefs.manifestUrls), and is cached; the copy bundled in the APK
  * (assets/manifest.json) is the fallback, so a fresh install works offline-first and model updates don't need a new APK.
  */
 class ModelStore(private val ctx: Context) {
@@ -163,7 +169,7 @@ class ModelStore(private val ctx: Context) {
 
     /** Download + verify every missing file of the model. progress(doneBytes, totalBytes). Throws on failure. */
     fun download(spec: ModelSpec, progress: (Long, Long) -> Unit) {
-        val bases = manifest().baseUrls
+        val bases = manifest().mirrors(spec)
         val total = spec.downloadBytes
         var done = installedBytes(spec)
         progress(done, total)

@@ -1,9 +1,8 @@
 {
  "schema": 1,
- "updated": "2026-11-09T01:09:51Z",
+ "updated": "2026-11-10T01:11:32Z",
  "base_url": "https://autocorrect.mostlime.hackclub.app/autocorrect-android/",
  "base_urls": [
-  "https://github.com/Mostlime12195/keylime-models/releases/download/models-style1/",
   "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
  ],
  "default": "m2s_int4",
@@ -13,6 +12,10 @@
    "id": "m2s_int4",
    "label": "m2 106M int4",
    "format": "ort",
+   "base_urls": [
+    "https://huggingface.co/MostLime/keylime-m2/resolve/main/",
+    "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
+   ],
    "graph": {
     "file": "m2s.step.int4m.ort",
     "size": 78969984,
@@ -175,6 +178,10 @@
    "id": "block4",
    "label": "m1 34M int8",
    "format": "ort",
+   "base_urls": [
+    "https://huggingface.co/MostLime/keylime-m1/resolve/main/",
+    "https://autocorrect.mostlime.hackclub.app/autocorrect-android/"
+   ],
    "graph": {
     "file": "lm_block4.step.int8.ort",
     "size": 42312320,

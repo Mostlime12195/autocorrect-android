@@ -220,9 +220,10 @@ class Prefs(private val ctx: Context) {
 
         /** Collection endpoint (autocorrect repo collect/API.md); only used when sharing is switched on. */
         const val DEFAULT_UPLOAD_URL = "https://autocorrect.mostlime.hackclub.app/api/v1/upload"
+        /** Nest first, the GitHub models-v1 copy as the fallback. The model files themselves come from each model's base_urls (Hugging Face, then Nest). */
         val DEFAULT_MANIFEST_URLS = listOf(
-            "https://github.com/Mostlime12195/keylime-models/releases/download/models-v1/manifest.json",
             "https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json",
+            "https://github.com/Mostlime12195/keylime-models/releases/download/models-v1/manifest.json",
         )
         val STYLES = listOf("casual", "standard", "formal")
         val SWATCHES = listOf("Blue" to "#1E88E5", "Teal" to "#00897B", "Green" to "#43A047", "Lime" to "#7CB342", "Amber" to "#FFB300",

@@ -102,13 +102,18 @@ In the Autocorrect app:
 
 ## Models and download
 
-Models are not in the APK or in this repo. They are release assets of the public repo
-[Mostlime12195/keylime-models](https://github.com/Mostlime12195/keylime-models) (tag `models-v1`). On first run the app fetches that release's `manifest.json`
-(fallback: `https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json`), which lists each model's files
-with size and SHA-256 and the mirrors to download from, and downloads the active model's files into app-private storage
-with WorkManager (progress in settings). A file is used only after its SHA-256 matches. A copy of the manifest is
-bundled (`app/src/main/assets/manifest.json`) as the fallback. A new model only needs new assets + manifest, no new APK:
-`gh release upload models-v1 --clobber -R Mostlime12195/keylime-models <files> manifest.json`.
+Models are not in the APK or in this repo. Each model has its own public Hugging Face repo:
+[MostLime/keylime-m2](https://huggingface.co/MostLime/keylime-m2) (106M, default) and
+[MostLime/keylime-m1](https://huggingface.co/MostLime/keylime-m1) (34M, battery saver), mirrored on Nest. On first run
+the app fetches `https://autocorrect.mostlime.hackclub.app/autocorrect-android/manifest.json` (fallback: the copy in the
+`models-v1` release of [Mostlime12195/keylime-models](https://github.com/Mostlime12195/keylime-models)), which lists each
+model's files with size and SHA-256 and the mirrors to download from: the model's own `base_urls` (its HF
+`resolve/main/` URL, then Nest) first, then the top-level `base_urls`. The active model's files go into app-private
+storage via WorkManager (progress in settings). A file is used only after its SHA-256 matches. A copy of the manifest is
+bundled (`app/src/main/assets/manifest.json`) as the fallback. A new model only needs new files + manifest, no new APK:
+upload the files to the model's HF repo, regenerate the manifest (`android_export/make_manifest.py`, then
+`tools/model_export/add_tree_graphs.py`), push it to Nest (`android_export/publish.sh`) and
+`gh release upload models-v1 --clobber -R Mostlime12195/keylime-models manifest.json`.
 
 Model files are **pre-optimized ORT format** (`.ort`), made on an arm64 host by `android_export/to_ort.py` in the
 autocorrect repo (all graph optimizations applied at conversion, int4 `DequantizeLinear+MatMul` fused to `MatMulNBits`
@@ -206,4 +211,4 @@ ORT tests).
 
 ## License
 
-Code: MIT (see `LICENSE`). Model weights in [keylime-models](https://github.com/Mostlime12195/keylime-models): CC BY 4.0. Icons: Material Symbols (Apache 2.0).
+Code: MIT (see `LICENSE`). Model weights on Hugging Face ([keylime-m2](https://huggingface.co/MostLime/keylime-m2), [keylime-m1](https://huggingface.co/MostLime/keylime-m1)): CC BY 4.0. Icons: Material Symbols (Apache 2.0).
