@@ -119,7 +119,9 @@ class KeyboardControllerTest {
         val queue = ArrayList<Pair<CorrectionRequest, (WordResult?) -> Unit>>()
         val requests = ArrayList<CorrectionRequest>()
         override fun correct(req: CorrectionRequest, done: (WordResult?) -> Unit) { requests.add(req); queue.add(req to done) }
-        override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) {}
+        /** what the strip shows while typing (empty: nothing) */
+        var suggestions: List<String> = emptyList()
+        override fun suggest(typed: String, touches: List<Touch>, done: (List<String>) -> Unit) { if (suggestions.isNotEmpty()) done(suggestions) }
         override fun cancelQueued() {}
         val rewinds = ArrayList<Pair<List<RewindTarget>, (List<RewindChange>) -> Unit>>()
         var rewindLm: LmScorer = lm
@@ -402,6 +404,38 @@ class KeyboardControllerTest {
         assertEquals(listOf("world", "word", "wild"), ctl.shown)
         type(".")
         assertEquals("hello world. ", ed.text.toString())
+    }
+
+    @Test fun pickWhileTypingThenPunctuationTakesTheSpace() {
+        engine.suggestions = listOf("hello", "help")
+        type("hel")
+        timer.fireAll()
+        assertEquals(listOf("hello", "help"), ctl.shown)
+        ctl.pickSuggestion(0)
+        assertEquals("hello ", ed.text.toString())
+        type(",")
+        assertEquals("hello, ", ed.text.toString())
+        type("!")
+        assertEquals("hello,! ", ed.text.toString())
+        type("x")
+        assertEquals("hello,! x", ed.text.toString())
+    }
+
+    @Test fun typedSpaceThenPunctuationStaysAfterTheSpace() {
+        type("go .")
+        engine.deliver()
+        assertEquals("go .", ed.text.toString())     // a space the user typed stays where it is
+    }
+
+    @Test fun pickAlternativeAfterAutocorrectThenPunctuationTakesTheSpace() {
+        type("teh ")
+        engine.deliver()
+        assertEquals("the ", ed.text.toString())
+        val alt = ctl.shown.first { it != "the" }
+        ctl.pickSuggestion(ctl.shown.indexOf(alt))
+        assertEquals("$alt ", ed.text.toString())
+        type(".")
+        assertEquals("$alt. ", ed.text.toString())
     }
 
     @Test fun swipeAddsLeadingSpaceAndBackspaceRemovesWholeWord() {
