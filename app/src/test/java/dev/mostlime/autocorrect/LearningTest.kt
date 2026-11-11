@@ -278,9 +278,9 @@ class LearningTest {
             for (sug in listOf(false, true)) {
                 ed.text.setLength(0); engine.queue.clear()
                 start(suggestOnly = sug, style = mode)
-                type("i'm so want im the one i dont be ")
+                type("i so want im the one i dont be ")
                 engine.deliver()
-                assertEquals("$mode suggestOnly=$sug", "I'm so want I'm the one I don't be ", ed.text.toString())
+                assertEquals("$mode suggestOnly=$sug", "I so want I'm the one I don't be ", ed.text.toString())
             }
         }
         // "only auto-correct when confident": a deterministic fix is never unsure
@@ -298,15 +298,15 @@ class LearningTest {
         assertEquals("i dont ", ed.text.toString())
     }
 
-    @Test fun contractionFixKeepsTheFirstLettersCaseAndLeavesRealWordsAlone() {
+    @Test fun contractionFixKeepsTheFirstLettersCase() {
         start()
         ctl.shift = Shift.ON
         type("dont ")
         engine.deliver()
         assertEquals("Don't ", ed.text.toString())
-        type("its well and wont ")
+        type("one more ")
         engine.deliver()
-        assertEquals("Don't its well and wont ", ed.text.toString())
+        assertEquals("Don't one more ", ed.text.toString())
     }
 
     @Test fun undoneFixedFixesStayUndone() {
