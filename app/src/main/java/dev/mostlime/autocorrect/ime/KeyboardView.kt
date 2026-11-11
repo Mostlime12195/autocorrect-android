@@ -274,7 +274,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
     private val pending = PendingPress { k, t -> listener.onKey(k, t) }
 
     // long-press alternates
-    private class Alts(val key: KeyDef, val pointer: Int, val options: List<String>, var sel: Int, val touch: Touch)
+    private class Alts(val key: KeyDef, val pointer: Int, val options: List<String>, var sel: Int, val touch: Touch) { val first = sel }
     private var alts: Alts? = null
     private val longPress = Runnable { openAlternates() }
     private val commaLongPress = Runnable {
@@ -749,13 +749,19 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         invalidate()
     }
 
+    /** left edge of the popup over key rect [r]: the default option sits over the key, the rest run away from it */
+    private fun popupLeft(a: Alts, r: RectF, cw: Float): Float {
+        val w = cw * a.options.size
+        return (r.centerX() - cw / 2 - a.first * cw).coerceIn(2 * dp, width - w - 2 * dp)
+    }
+
     private fun drawPopups(canvas: Canvas) {
         val a = alts
         if (a != null) {
             keyRect(a.key, rect)
             val cw = keyW * 0.95f
             val w = cw * a.options.size
-            val left = (rect.centerX() - cw / 2).coerceIn(2 * dp, width - w - 2 * dp)
+            val left = popupLeft(a, rect, cw)
             val top = rect.top - rh * 1.1f
             rect.set(left, top, left + w, top + rh)
             keyPaint.color = pal.popup
@@ -804,7 +810,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
         val touch = pending.touch ?: Touch.APOS
         pending.drop(longPressPointer)   // the press is a long press now: its key never types
         if (commaPointer == longPressPointer) { ui.removeCallbacks(commaLongPress); commaPointer = -1 }
-        alts = Alts(k, longPressPointer, opts, 0, touch)
+        alts = Alts(k, longPressPointer, opts, KeyboardLayout.defaultAlternate(k, opts), touch)
         buzz(strong = true)
         invalidate()
     }
@@ -892,7 +898,7 @@ class KeyboardView(ctx: Context, private val listener: Listener) : View(ctx) {
                 if (pi < 0) return true
                 keyRect(a.key, rect)
                 val cw = keyW * 0.95f
-                val left = (rect.centerX() - cw / 2).coerceIn(2 * dp, width - cw * a.options.size - 2 * dp)
+                val left = popupLeft(a, rect, cw)
                 val sel = ((e.getX(pi) - left) / cw).toInt().coerceIn(0, a.options.size - 1)
                 if (sel != a.sel) { a.sel = sel; invalidate() }
             }

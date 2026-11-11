@@ -35,6 +35,8 @@ class KeyboardRoot(ctx: Context, val keys: KeyboardView) : FrameLayout(ctx) {
 
     fun hidePanel() { panel?.let { removeView(it) }; panel = null }
     val panelShown get() = panel != null
+    /** the panel on screen, if any */
+    val current: View? get() = panel
 }
 
 /** Small helpers for programmatic panel UI in the keyboard's palette. */

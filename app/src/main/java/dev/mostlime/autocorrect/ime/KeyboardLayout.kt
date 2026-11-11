@@ -128,6 +128,13 @@ object KeyboardLayout {
     /** Long-press popup for a key: its hint first (the default on release), then accents, then the user's own entries. */
     fun alternates(k: KeyDef): List<String> = if (k.type != KeyType.CHAR) emptyList() else
         (listOfNotNull(k.hint) + ALTS[k.text].orEmpty() + extra[k.text.lowercase()].orEmpty()).distinct()
+            .let { if (k.text in MIRRORED) it.reversed() else it }
+
+    /** keys near the right edge whose popup runs right to left, so the first option sits by the finger */
+    private val MIRRORED = setOf(".")
+
+    /** index of the option selected when the popup opens (the first one, nearest the key) */
+    fun defaultAlternate(k: KeyDef, opts: List<String>): Int = if (k.text in MIRRORED) opts.size - 1 else 0
 
     /**
      * Custom long-press text: one key per line, "key: entry entry ..." (entries are separated by spaces and can be

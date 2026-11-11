@@ -229,6 +229,8 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     private fun showEmoji() {
         val r = root ?: return
+        // its strip button again closes it
+        if (r.current is EmojiPanel) { r.hidePanel(); return }
         val data = EmojiData.get(this)
         r.showPanel(EmojiPanel(this, Palette(this), data, { emojiRecents.toList() }, { e ->
             ctl.insertText(e)
@@ -249,6 +251,7 @@ class AutocorrectIME : InputMethodService(), KeyboardView.Listener {
 
     private fun showClipboard() {
         val r = root ?: return
+        if (r.current is ClipboardPanel) { r.hidePanel(); return }
         val p = ClipboardPanel(this, Palette(this), clips, { t -> ctl.insertText(t); clips.consumeOffer(); r.hidePanel(); updateClipChip() }) { r.hidePanel() }
         r.showPanel(p)
     }
