@@ -303,8 +303,11 @@ class KeyboardController(
     /** id of the swipe being decoded (0 = none); a result for another id is dropped */
     private var swipePending = 0
     private var nextSwipeId = 1
-    /** the text ends with the auto space after a swiped word: punctuation typed next goes before it */
-    private var swipeSpace = false
+    /** the text ends with the keyboard's own space (after a swipe or a strip pick): punctuation typed next goes before it */
+    private var autoSpace = false
+    /** the text before the cursor when [autoSpace] was set: a cursor move (text differs) cancels it */
+    private var autoSpaceTail = ""
+    private fun setAutoSpace(ed: Editor, on: Boolean) { autoSpace = on; autoSpaceTail = if (on) ed.textBefore(AUTO_SPACE_TAIL) else "" }
 
     var stats = Stats()
     class Stats { var applied = 0; var dropped = 0; var unchanged = 0 }
@@ -321,7 +324,7 @@ class KeyboardController(
         idleToken?.let { timer.cancel(it) }; idleToken = null
         markToken?.let { timer.cancel(it) }; markToken = null
         pendingRemarks.clear(); wordsSinceCheck = 0; periodicDue = false
-        swipeShift = null; swipePending = 0; swipeSpace = false
+        swipeShift = null; swipePending = 0; autoSpace = false
         releaseHold()
         shift = Shift.OFF
         autoShift()
@@ -356,8 +359,8 @@ class KeyboardController(
         idleTouch()
         if (holding) { held.add { key(k, touch, base) }; return }
         val ed = ed() ?: return
-        val afterSwipe = swipeSpace
-        swipeSpace = false
+        val afterAuto = autoSpace && ed.textBefore(AUTO_SPACE_TAIL) == autoSpaceTail
+        autoSpace = false
         when (k.type) {
             KeyType.CHAR -> {
                 var c = k.text
@@ -375,12 +378,12 @@ class KeyboardController(
                     scheduleSuggest()
                 } else if (composing.isNotEmpty()) {
                     finishWord(ed, c, trigger = ch in WORD_END_PUNCT)
-                } else if (afterSwipe && ch in SWIPE_PUNCT && ed.textBefore(1) == " " && !ed.hasSelection()) {
+                } else if (afterAuto && ch in SWIPE_PUNCT && ed.textBefore(1) == " " && !ed.hasSelection()) {
                     // "word " + "." -> "word. " (the swiped word's auto space moves after the punctuation)
                     flushLast()
                     ed.beginBatch(); ed.deleteBefore(1); ed.commit("$c "); ed.endBatch()
                     corr()?.between("\b$c ")
-                    swipeSpace = true
+                    setAutoSpace(ed, true)
                     setStrip(emptyList(), -1, StripMode.NONE)
                     autoShift()
                 } else {
@@ -1016,6 +1019,8 @@ class KeyboardController(
                 }
                 last = Last(typed, tch, pick, " ", null, null, "")
                 prev = null
+                // the pick's space is the keyboard's: punctuation next goes before it ("word " + "." -> "word. ")
+                setAutoSpace(ed, true)
                 setStrip(emptyList(), -1, StripMode.NONE)
                 autoShift()
             }
@@ -1033,7 +1038,9 @@ class KeyboardController(
                 last = if (l.swiped) Last("", emptyList(), pick, l.sepText, null, null, "", l.lead) else null
                 if (pick == l.typed && l.result != null && !l.swiped) learnFromUndo(l.undoPrefix + l.typed, l.out, l.event)
                 prev?.let { pv -> val k = pv.slot.cands.indexOf(pick); if (k >= 0) { pv.idx = k; pv.out = pick } else prev = null }
-                if (l.swiped) { swipeSpace = l.sepText == " "; autoShift() }
+                // after a pick, punctuation goes before the space (like after a swipe or a pick while typing)
+                setAutoSpace(ed, l.sepText == " ")
+                if (l.swiped) autoShift()
                 setStrip(emptyList(), -1, StripMode.NONE)
             }
             StripMode.REWIND -> {
@@ -1398,7 +1405,7 @@ class KeyboardController(
     fun insertText(t: String) {
         if (holding) { held.add { insertText(t) }; return }
         val ed = ed() ?: return
-        swipeSpace = false
+        autoSpace = false
         flushLast()
         cancelSuggest()
         if (composing.isNotEmpty()) { ed.commit(composing.toString()); resetWord() }
@@ -1438,7 +1445,7 @@ class KeyboardController(
         idleTouch()
         if (holding) { held.add { swipe(path) }; return }
         val ed = ed() ?: return
-        swipeSpace = false
+        autoSpace = false
         flushLast()
         cancelSuggest()
         if (composing.isNotEmpty()) {
@@ -1480,7 +1487,7 @@ class KeyboardController(
             }
             last = Last("", emptyList(), out, " ", null, null, "", lead)
             prev = null
-            swipeSpace = true
+            setAutoSpace(ed, true)
             autoShift()
             setStrip(strip, strip.indexOf(out), StripMode.LAST_WORD, undo = undo)
         } finally {
@@ -1584,6 +1591,8 @@ class KeyboardController(
         const val SWIPE_HOLD_MS = 1500L
         /** punctuation that takes the swiped word's auto space: "word ." -> "word. " */
         const val SWIPE_PUNCT = ".,!?;:"
+        /** how much text before the cursor must be unchanged for [autoSpace] to still count */
+        const val AUTO_SPACE_TAIL = 40
         /** no auto space before a swiped word after these */
         const val NO_SPACE_AFTER = "([{/@#\"'-_\n"
         val WORD_RE = Regex("[A-Za-z]+(?:'[A-Za-z]+)*'?")
