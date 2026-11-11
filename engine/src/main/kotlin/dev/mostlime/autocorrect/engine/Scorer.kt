@@ -257,8 +257,6 @@ class StepModel(
             val opts = OrtSession.SessionOptions()
             opts.setIntraOpNumThreads(threads)
             opts.setInterOpNumThreads(1)
-            // the CPU arena keeps the largest batch's buffers for good; plain malloc gives them back
-            opts.setCPUArenaAllocator(false)
             // worker threads block instead of spin-waiting: the keyboard always shares the CPU with the app in front
             // (and its own UI thread), and a spinning pool whose workers lose their core is slower, not faster
             // (2 threads on a loaded 2-core box: 113 ms/word without spinning vs 156 ms with)
