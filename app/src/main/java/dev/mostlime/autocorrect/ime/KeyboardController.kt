@@ -281,6 +281,9 @@ class KeyboardController(
      */
     private class PendingUndo(val word: String, val full: String, val out: String, val gap: Double, val ev: Map<String, Any?>?)
     private var pendingUndo: PendingUndo? = null
+    /** an underline put on a word whose fix was undone before: still there when the next word ends = ignored */
+    private class IgnoreWatch(val word: String, val gap: Double)
+    private var ignoreWatch: IgnoreWatch? = null
 
     /** words already rewound (or reverted by the user) by their start in the position counter: never touched again */
     private val rewound = HashSet<Long>()
@@ -487,6 +490,10 @@ class KeyboardController(
             corr()?.undoResolved(pu.ev?.get("id") as? String, now)
             if (now == pu.word) learnFromUndo(pu.full, pu.out, pu.ev, pu.gap)
             // now == pu.out (retyped the fix) or something else: not a rejection, nothing learned
+        }
+        ignoreWatch?.let { w ->
+            ignoreWatch = null
+            if ((flags.any { it.word == w.word } || typo?.typed == w.word) && !learning.isUserWord(w.word)) rejectSpelling(w.word, w.gap)
         }
         composing.toString().takeIf { it.isNotEmpty() && learning.isUserWord(it) }?.let { learning.seenTyped(it) }
         cancelSuggest()
@@ -815,9 +822,12 @@ class KeyboardController(
         engine.rewind(targets) { changes -> rewindBusy = false; applyRewind(snap, end, changes) }
     }
 
-    private fun applyRewind(snap: String, end: Long, changes: List<RewindChange>) {
+    private fun applyRewind(snap: String, end: Long, proposed: List<RewindChange>) {
         // never while a word is being typed (tried again after the next word's result)
-        if (changes.isEmpty() || holding || pendings.isNotEmpty() || composing.isNotEmpty()) return
+        if (proposed.isEmpty() || holding || pendings.isNotEmpty() || composing.isNotEmpty()) return
+        // a rewind the user undid is never applied again
+        val changes = proposed.filter { learning.penalty(it.from, it.to) == 0.0 }
+        if (changes.isEmpty()) return
         val ed = ed() ?: return
         val cur = composing.toString()
         val first = changes.minOf { it.start }
@@ -898,15 +908,22 @@ class KeyboardController(
         // the previous word came from a fixed rule (FixedFixes): its text is final; at most a comma / stop is added
         val prevFixed = pd.prevOut != null && pd.prevTyped?.let(::fixedFor) == pd.prevOut
         // suggest-only never edits anything but the fixed rules
-        val mg = r.merge?.takeIf { pd.prevOut != null && !prevFixed && !config.suggestOnly }
-        val rc = r.recheck?.takeIf { mg == null && pd.prevOut != null && !prevFixed && !config.suggestOnly }
+        // an edit the user undid (penalty > 0) is never applied again, on any path
+        val mg = r.merge?.takeIf { pd.prevOut != null && !prevFixed && !config.suggestOnly && learning.penalty(pd.prevOut + pd.prevSep + pd.typed, it.to) == 0.0 }
+        val recheckBlocked = r.recheck?.let { learning.penalty(it.from, it.to) > 0 } == true
+        val rc = r.recheck?.takeIf { mg == null && pd.prevOut != null && !prevFixed && !config.suggestOnly && !recheckBlocked }
         // new text for the previous word: re-check flip and/or formal punctuation
         val prevText = if (prevFixed) r.prevText?.takeIf { r.recheck == null }?.takeLastWhile { it in ",.!?;:" }?.takeIf { it.isNotEmpty() }?.let { pd.prevOut + it }
             else r.prevText?.let(::capI)
-        val prevNew = prevText?.takeIf { mg == null && pd.prevOut != null && it != pd.prevOut && !config.suggestOnly }
+        val prevNew = prevText?.takeIf { mg == null && pd.prevOut != null && it != pd.prevOut && !config.suggestOnly && !recheckBlocked }
         // deterministic fix of this word (lone i, missing apostrophes): not subject to unsure / risky / suggest-only
         val fx = if (mg == null) fixedFor(pd.typed) else null
-        val out = fx ?: capI(mg?.to ?: r.out)
+        var out = fx ?: capI(mg?.to ?: r.out)
+        // a fixed rule (i -> I, dont -> don't) the user undid: the word stays as typed, no underline (like the fixed rules themselves)
+        val ruled = FixedFixes.fix(pd.typed)
+        if (fx == null && ruled != null && out.lowercase() == ruled.lowercase() && learning.penalty(pd.typed, out) > 0) out = pd.typed
+        // any other fix the user undid before: never applied again while the penalty lasts, underlined instead
+        val undone = fx == null && mg == null && out != pd.typed && learning.penalty(pd.typed, out) > 0
         val cur = composing.toString()
         val changed = out != pd.typed || prevNew != null
         val ev = if (!config.policy.sensitive) buildEvent(pd, r) else null
@@ -918,8 +935,13 @@ class KeyboardController(
         // (transpositions count as one: "teh" / "hte" are ordinary typos; real words are left to the other rules)
         val risky = fx == null && !config.suggestOnly && r.out != pd.typed && mg == null && pd.typed.length <= 5 && !learning.inVocab(pd.typed) &&
             osaDistance(pd.typed.lowercase(), r.out.lowercase()) >= 2 && gapOf(r) < RISKY_APPLY_GAP
-        if ((config.suggestOnly && fx == null) || unsure || risky) {
-            if (flag(pd, r, ev, if (config.suggestOnly) "suggest" else if (risky) "risky" else "unsure", force = risky)) return
+        if ((config.suggestOnly && fx == null) || unsure || risky || undone) {
+            val why = if (config.suggestOnly) "suggest" else if (risky) "risky" else if (undone) "undone" else "unsure"
+            if (flag(pd, r, ev, why, force = risky || undone)) {
+                // the underline of an undone spelling fix: ignoring it is the second rejection (see learnFromUndo)
+                if (undone && isSpellingEdit(pd.typed, out)) ignoreWatch = IgnoreWatch(pd.typed, gapOf(r))
+                return
+            }
             stats.unchanged++
             if (ev != null) writePerf(r)
             return
@@ -1300,20 +1322,25 @@ class KeyboardController(
     }
 
     /**
-     * An auto edit was undone. Spelling: count it; the second undo of the same typed word adds it to the dictionary.
-     * Anything else (grammar guard): never the dictionary, only a suppression of this edit for a while.
+     * An auto edit was undone: that exact edit is never applied again for a while (suppress; underlined instead).
+     * Spelling: this is the first rejection of the typed word; the second (ignoring the underline that replaces the fix,
+     * see ignoreWatch) adds it to the dictionary. Anything else (grammar guard): never the dictionary.
      */
     private fun learnFromUndo(typed: String, out: String, ev: Map<String, Any?>?, gap: Double = 0.0) {
         if (learning.isUserWord(typed) || typed == out) return
-        if (isSpellingEdit(typed, out)) {
-            // looks like a typo of a common word that the model was sure about: needs undos in two sessions
-            val typoLike = gap >= STRONG_GAP && learning.nearCommonWord(typed)
-            if (learning.shouldLearn(typed, typoLike) && learning.addLearned(typed)) {
-                dictAdded = typed
-                ui.onDictAdded(typed)
-                // a toast says so; the word can be removed in settings (no extra pill in the strip)
-            }
-        } else suppressEdit(typed, out, "undo", ev)
+        if (isSpellingEdit(typed, out)) rejectSpelling(typed, gap)
+        suppressEdit(typed, out, "undo", ev)
+    }
+
+    /** one rejection of a typed word's spelling fix (undo, or an ignored underline); enough of them add the word */
+    private fun rejectSpelling(typed: String, gap: Double) {
+        // looks like a typo of a common word that the model was sure about: needs rejections in two sessions
+        val typoLike = gap >= STRONG_GAP && learning.nearCommonWord(typed)
+        if (learning.shouldLearn(typed, typoLike) && learning.addLearned(typed)) {
+            dictAdded = typed
+            ui.onDictAdded(typed)
+            // a toast says so; the word can be removed in settings (no extra pill in the strip)
+        }
     }
 
     /** how much the model preferred its fix over the word as typed (score units; big = sure) */

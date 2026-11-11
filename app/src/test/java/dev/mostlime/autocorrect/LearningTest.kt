@@ -256,20 +256,43 @@ class LearningTest {
         assertTrue(corrector.candidates("fizrd", null).cands.contains("Fized"))
     }
 
-    @Test fun twoSpellingUndosAddTheWord() {
+    /** one undo = never auto-applied again (underlined instead); ignoring that underline is the second rejection */
+    @Test fun undoneSpellingFixComesBackAsAnUnderlineNotAnEdit() {
         start()
-        repeat(2) {
-            type("fized ")
-            engine.deliver()
-            assertTrue(ed.text.toString(), ed.text.endsWith("fixed "))
-            type("\b")                                     // undo: back to "fized"
-            type(" ")
-        }
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))   // the model still wants it
+        type("fized ")
+        engine.deliver()
+        assertTrue(ed.text.toString(), ed.text.endsWith("fixed "))
+        type("\b")                                         // undo: back to "fized"
+        type(" ")
+        assertEquals("fized ", ed.text.toString())
+        assertTrue(user.penalty("fized", "fixed") > 0)
+        assertFalse(user.has("fized"))                      // one rejection: not yet in the dictionary
+        type("fized ")
+        engine.deliver()
+        assertEquals("fized fized ", ed.text.toString())    // not edited
+        timer.fireAll()
+        assertEquals("fixed", ed.marks["fized ".length]?.first())   // underlined, with the fix on offer
+        assertTrue(events.any { it["outcome"] == "flagged" && it["flag"] == "undone" })
+    }
+
+    @Test fun twoSpellingRejectionsAddTheWord() {
+        start()
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))
+        type("fized ")
+        engine.deliver()
+        assertTrue(ed.text.toString(), ed.text.endsWith("fixed "))
+        type("\b")                                         // rejection 1: the undo
+        type(" ")
+        assertFalse(user.has("fized"))
+        type("fized ")
+        engine.deliver()                                    // underlined, not edited
+        type("a ")                                          // rejection 2: the underline is ignored
         assertTrue(user.has("fized"))
         assertEquals(listOf("fized"), added)
         type("fized ")
         engine.deliver()
-        assertTrue(ed.text.toString(), ed.text.endsWith("fized fized fized "))
+        assertTrue(ed.text.toString(), ed.text.endsWith("fized fized a fized "))
     }
 
     // ------------------------------------------------------------------ fixed rules (FixedFixes): lone i, missing apostrophes
@@ -337,7 +360,9 @@ class LearningTest {
 
     @Test fun autoAddShowsNoPill() {
         start()
-        repeat(2) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))
+        type("fized "); engine.deliver(); type("\b"); type(" ")
+        type("fized "); engine.deliver(); type("a ")
         assertTrue(user.has("fized"))
         assertEquals(null, ctl.shownAction)
     }
@@ -345,12 +370,16 @@ class LearningTest {
     @Test fun grammarUndosNeverTouchTheDictionary() {
         start()
         engine.crafted["their"] = result("their", listOf("their", "there"), doubleArrayOf(0.0, 5.0))
-        repeat(3) {
+        type("i went their ")
+        engine.deliver()
+        assertTrue(ed.text.toString(), ed.text.endsWith("went there "))
+        type("\b")                                         // undo the confusable swap
+        type(" ")
+        ed.text.setLength(0); ctl.startInput(ctl.config)
+        repeat(2) {                                         // never swapped again
             type("i went their ")
             engine.deliver()
-            assertTrue(ed.text.toString(), ed.text.endsWith("went there "))
-            type("\b")                                     // undo the confusable swap
-            type(" ")
+            assertTrue(ed.text.toString(), ed.text.endsWith("went their "))
             ed.text.setLength(0); ctl.startInput(ctl.config)
         }
         assertFalse(user.has("their"))
@@ -488,7 +517,9 @@ class LearningTest {
         }
         assertFalse(user.has("fized"))
         // a real undo (the word as typed stays) still counts
-        repeat(2) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))
+        type("fized "); engine.deliver(); type("\b"); type(" ")
+        type("fized "); engine.deliver(); type("a ")
         assertTrue(user.has("fized"))
     }
 
@@ -497,10 +528,11 @@ class LearningTest {
         nearCommon = true
         engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))   // strong preference
         start()
-        repeat(3) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        type("fized "); engine.deliver(); type("\b"); type(" ")                 // the undo
+        repeat(3) { type("fized "); engine.deliver(); type("a ") }                // underlined, ignored
         assertFalse("same session: not learned", user.has("fized"))
         session = "s2"; start()
-        type("fized "); engine.deliver(); type("\b"); type(" ")
+        type("fized "); engine.deliver(); type("a ")
         assertTrue(user.has("fized"))
         assertEquals(listOf("fized"), user.probationWords())     // on probation: protected, not suggested yet
         assertTrue(user.near("fizrd").isEmpty())
