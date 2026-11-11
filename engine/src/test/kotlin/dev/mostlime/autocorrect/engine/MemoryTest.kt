@@ -6,6 +6,8 @@ import org.junit.Test
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.channels.FileChannel
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.assertContentEquals
 import kotlin.test.assertTrue
 
@@ -24,13 +26,13 @@ class MemoryTest {
     /** highest resident size sampled while [body] runs, minus the level before it */
     private fun peakGrowth(body: () -> Unit): Long {
         val base = rssBytes()
-        @Volatile var peak = base
-        @Volatile var stop = false
-        val t = Thread { while (!stop) { peak = maxOf(peak, rssBytes()); Thread.sleep(1) } }
+        val peak = AtomicLong(base)
+        val stop = AtomicBoolean(false)
+        val t = Thread { while (!stop.get()) { peak.accumulateAndGet(rssBytes()) { a, b -> maxOf(a, b) }; Thread.sleep(1) } }
         t.start()
         body()
-        stop = true; t.join()
-        return maxOf(peak, rssBytes()) - base
+        stop.set(true); t.join()
+        return maxOf(peak.get(), rssBytes()) - base
     }
 
     @Test fun chunkedScoringIsIdenticalAndLighter() {
