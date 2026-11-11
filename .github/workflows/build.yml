@@ -21,6 +21,7 @@ concurrency:
 
 env:
   MODEL_HOST: https://huggingface.co/MostLime/keylime-m1-preview/resolve/main
+  MODEL_HOST_M2: https://huggingface.co/MostLime/keylime-m2-preview/resolve/main
 
 jobs:
   build:
@@ -41,7 +42,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: models
-          key: test-model-${{ hashFiles('app/src/main/assets/manifest.json') }}
+          key: test-model-v2-${{ hashFiles('app/src/main/assets/manifest.json') }}
       - name: Fetch test model
         continue-on-error: true
         run: |
@@ -49,6 +50,8 @@ jobs:
           [ -s models/lm_block4.step.int8.ort ] || curl -fsSL --retry 3 -o models/lm_block4.step.int8.ort "$MODEL_HOST/lm_block4.step.int8.ort" || rm -f models/lm_block4.step.int8.ort
           # fallback: the Nest mirror of the same file
           [ -s models/lm_block4.step.int8.ort ] || curl -fsSL --retry 3 -o models/lm_block4.step.int8.ort "https://autocorrect.mostlime.hackclub.app/autocorrect-android/lm_block4.step.int8.ort" || rm -f models/lm_block4.step.int8.ort
+          # m2s int4 graph for engine/MemoryTest (chunked scoring parity + peak memory)
+          [ -s models/m2s.step.int4m.ort ] || curl -fsSL --retry 3 -o models/m2s.step.int4m.ort "$MODEL_HOST_M2/m2s.step.int4m.ort" || rm -f models/m2s.step.int4m.ort
           ls -la models
 
       - name: Unit tests (engine parity + app)

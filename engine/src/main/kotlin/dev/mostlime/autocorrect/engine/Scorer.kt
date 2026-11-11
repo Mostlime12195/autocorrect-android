@@ -50,6 +50,14 @@ class StepModel(
     @Volatile var closed = false
         private set
 
+    /**
+     * Most candidate rows per run that keep scores bit-identical to one big batch, and cap the peak memory (every row
+     * computes full-vocab logits). The int4 (MatMulNBits) graphs take fp32 activations, so rows are independent; the
+     * int8 graphs quantize activations dynamically with one scale per call, so a row's score depends on the rest of
+     * the batch and those run whole. Set by the caller from the graph (EngineHolder).
+     */
+    @Volatile var rowLimit: Int = Int.MAX_VALUE
+
     /** timing counters (benchmarks / debugging): runs, wall ns in run(), ns inside session.run, rows x padded length */
     class Counters { var runs = 0L; var totalNs = 0L; var ortNs = 0L; var cells = 0L; var usedTokens = 0L; var headRows = 0L }
     val counters = Counters()
@@ -249,6 +257,8 @@ class StepModel(
             val opts = OrtSession.SessionOptions()
             opts.setIntraOpNumThreads(threads)
             opts.setInterOpNumThreads(1)
+            // the CPU arena keeps the largest batch's buffers for good; plain malloc gives them back
+            opts.setCPUArenaAllocator(false)
             // worker threads block instead of spin-waiting: the keyboard always shares the CPU with the app in front
             // (and its own UI thread), and a spinning pool whose workers lose their core is slower, not faster
             // (2 threads on a loaded 2-core box: 113 ms/word without spinning vs 156 ms with)
@@ -467,17 +477,26 @@ class NeuralScorer(
         }
         val pre: LmState = if (p > 0) prefix(ctxs[0].copyOfRange(0, p)) else step.fresh()
         val rems = keys.map { it.ctx.copyOfRange(p, it.ctx.size) + it.tgt }
-        val o = step.run(rems, p, pre, keepState = false)
-        tokensRun += rems.sumOf { it.size }
-        keys.forEachIndexed { b, kk ->
-            var s = 0.0
-            for (q in kk.tgt.indices) {
-                val j = kk.ctx.size - p + q
-                s += if (j == 0) pre.last!![kk.tgt[q]].toDouble() else o.tokLp[b * o.n + j - 1].toDouble()
+        // rows are independent (see StepModel.rowLimit): run them in chunks to keep the peak down
+        val step0 = step.rowLimit.coerceAtLeast(1)
+        var lo = 0
+        while (lo < rems.size) {
+            val hi = lo + minOf(step0, rems.size - lo)
+            val o = step.run(rems.subList(lo, hi), p, pre, keepState = false)
+            for (b in lo until hi) {
+                val kk = keys[b]
+                val r = b - lo
+                var s = 0.0
+                for (q in kk.tgt.indices) {
+                    val j = kk.ctx.size - p + q
+                    s += if (j == 0) pre.last!![kk.tgt[q]].toDouble() else o.tokLp[r * o.n + j - 1].toDouble()
+                }
+                if (!kk.eot) s += o.bnd[r * o.n + rems[b].size - 1].toDouble()
+                out[b] = s
             }
-            if (!kk.eot) s += o.bnd[b * o.n + rems[b].size - 1].toDouble()
-            out[b] = s
+            lo = hi
         }
+        tokensRun += rems.sumOf { it.size }
         return out
     }
 }

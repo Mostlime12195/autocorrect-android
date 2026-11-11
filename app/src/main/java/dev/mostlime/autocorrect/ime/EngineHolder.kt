@@ -178,6 +178,7 @@ object EngineHolder {
             val threads = wantThreads(app)
             val step = StepModel.open(env, buf, want.meta, threads = threads,
                 ortFormat = want.format == "ort", extraConfig = want.sessionConfig)
+            if (want.graph.name.contains("int4")) step.rowLimit = 32   // int4 rows are independent: bit-identical, lower peak
             withContext(dispatcher) {
                 release()
                 scorer = NeuralScorer(tok, step).also { it.maxCtx = app.prefs.ctxTokens }
