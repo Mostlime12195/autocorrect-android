@@ -1,5 +1,6 @@
 package dev.mostlime.autocorrect.ime
 
+import dev.mostlime.autocorrect.engine.FixedFixes
 import dev.mostlime.autocorrect.engine.MergeInput
 import dev.mostlime.autocorrect.engine.PrevWord
 import dev.mostlime.autocorrect.engine.Rewind
@@ -196,7 +197,7 @@ class KeyboardController(
     private class Pending(
         val id: Int, val typed: String, val touches: List<Touch>, var sepText: String, val before: String, val sep: String,
         val prevOut: String?, val prevSep: String, var anchor: Long,
-    ) { var done = false; var valid = true; var uncommitted = false }
+    ) { var done = false; var valid = true; var uncommitted = false; /** the previous word as typed (when prevOut is set) */ var prevTyped: String? = null }
     private val pendings = ArrayList<Pending>()
     private var nextId = 1
 
@@ -280,6 +281,9 @@ class KeyboardController(
      */
     private class PendingUndo(val word: String, val full: String, val out: String, val gap: Double, val ev: Map<String, Any?>?)
     private var pendingUndo: PendingUndo? = null
+    /** an underline put on a word whose fix was undone before: still there when the next word ends = ignored */
+    private class IgnoreWatch(val word: String, val gap: Double)
+    private var ignoreWatch: IgnoreWatch? = null
 
     /** words already rewound (or reverted by the user) by their start in the position counter: never touched again */
     private val rewound = HashSet<Long>()
@@ -487,6 +491,10 @@ class KeyboardController(
             if (now == pu.word) learnFromUndo(pu.full, pu.out, pu.ev, pu.gap)
             // now == pu.out (retyped the fix) or something else: not a rejection, nothing learned
         }
+        ignoreWatch?.let { w ->
+            ignoreWatch = null
+            if ((flags.any { it.word == w.word } || typo?.typed == w.word) && !learning.isUserWord(w.word)) rejectSpelling(w.word, w.gap)
+        }
         composing.toString().takeIf { it.isNotEmpty() && learning.isUserWord(it) }?.let { learning.seenTyped(it) }
         cancelSuggest()
         val typed = composing.toString()
@@ -517,7 +525,7 @@ class KeyboardController(
             PrevWord(p.slot, p.idx, leftp, sepp, p.lmScored, p.margin, p.scores)
         } else null
         val id = nextId++
-        val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, -1).apply { uncommitted = true }
+        val pd = Pending(id, typed, tch, sepText, before, sep, prevOut, prevSep, -1).apply { uncommitted = true; prevTyped = if (prevOut != null) p?.typed else null }
         pendings.add(pd)
         // keep at most MAX_PENDING corrections in flight (slow model + fast typing): the oldest gives way
         while (pendings.size > MAX_PENDING) { val old = pendings.removeAt(0); old.done = true; stats.dropped++ }
@@ -814,9 +822,12 @@ class KeyboardController(
         engine.rewind(targets) { changes -> rewindBusy = false; applyRewind(snap, end, changes) }
     }
 
-    private fun applyRewind(snap: String, end: Long, changes: List<RewindChange>) {
+    private fun applyRewind(snap: String, end: Long, proposed: List<RewindChange>) {
         // never while a word is being typed (tried again after the next word's result)
-        if (changes.isEmpty() || holding || pendings.isNotEmpty() || composing.isNotEmpty()) return
+        if (proposed.isEmpty() || holding || pendings.isNotEmpty() || composing.isNotEmpty()) return
+        // a rewind the user undid is never applied again
+        val changes = proposed.filter { learning.penalty(it.from, it.to) == 0.0 }
+        if (changes.isEmpty()) return
         val ed = ed() ?: return
         val cur = composing.toString()
         val first = changes.minOf { it.start }
@@ -894,23 +905,43 @@ class KeyboardController(
         ui.onResult(r)
         if (r == null) return
         val ed = ed() ?: return
-        val mg = r.merge?.takeIf { pd.prevOut != null }
-        val rc = r.recheck?.takeIf { mg == null && pd.prevOut != null }
+        // the previous word came from a fixed rule (FixedFixes): its text is final; at most a comma / stop is added
+        val prevFixed = pd.prevOut != null && pd.prevTyped?.let(::fixedFor) == pd.prevOut
+        // suggest-only never edits anything but the fixed rules
+        // an edit the user undid (penalty > 0) is never applied again, on any path
+        val mg = r.merge?.takeIf { pd.prevOut != null && !prevFixed && !config.suggestOnly && learning.penalty(pd.prevOut + pd.prevSep + pd.typed, it.to) == 0.0 }
+        val recheckBlocked = r.recheck?.let { learning.penalty(it.from, it.to) > 0 } == true
+        val rc = r.recheck?.takeIf { mg == null && pd.prevOut != null && !prevFixed && !config.suggestOnly && !recheckBlocked }
         // new text for the previous word: re-check flip and/or formal punctuation
-        val prevNew = r.prevText?.let(::capI)?.takeIf { mg == null && pd.prevOut != null && it != pd.prevOut }
-        val out = capI(mg?.to ?: r.out)
+        val prevText = if (prevFixed) r.prevText?.takeIf { r.recheck == null }?.takeLastWhile { it in ",.!?;:" }?.takeIf { it.isNotEmpty() }?.let { pd.prevOut + it }
+            else r.prevText?.let(::capI)
+        val prevNew = prevText?.takeIf { mg == null && pd.prevOut != null && it != pd.prevOut && !config.suggestOnly && !recheckBlocked }
+        // deterministic fix of this word (lone i, missing apostrophes): not subject to unsure / risky / suggest-only
+        val fx = if (mg == null) fixedFor(pd.typed) else null
+        var out = fx ?: capI(mg?.to ?: r.out)
+        // a fixed rule (i -> I, dont -> don't) the user undid: the word stays as typed, no underline (like the fixed rules themselves)
+        val ruled = FixedFixes.fix(pd.typed)
+        if (fx == null && ruled != null && out.lowercase() == ruled.lowercase() && learning.penalty(pd.typed, out) > 0) out = pd.typed
+        // any other fix the user undid before: never applied again while the penalty lasts, underlined instead
+        val undone = fx == null && mg == null && out != pd.typed && learning.penalty(pd.typed, out) > 0
         val cur = composing.toString()
         val changed = out != pd.typed || prevNew != null
         val ev = if (!config.policy.sensitive) buildEvent(pd, r) else null
+        if (fx != null && ev != null && (r.out != pd.typed || fx.lowercase() != pd.typed.lowercase())) { ev["chosen"] = fx; ev["final"] = fx }
         // suggest-only, or an unsure correction with "only auto-correct when confident": mark, never edit
-        val unsure = config.confidentOnly && r.out != pd.typed && mg == null && r.margin < CONFIDENT_MARGIN
+        val unsure = fx == null && config.confidentOnly && r.out != pd.typed && mg == null && r.margin < CONFIDENT_MARGIN
         // a short word that needs 2+ letters changed ("wruff" -> "stuff") is often slang: underline, don't replace,
         // unless the model is very sure
         // (transpositions count as one: "teh" / "hte" are ordinary typos; real words are left to the other rules)
-        val risky = !config.suggestOnly && r.out != pd.typed && mg == null && pd.typed.length <= 5 && !learning.inVocab(pd.typed) &&
+        val risky = fx == null && !config.suggestOnly && r.out != pd.typed && mg == null && pd.typed.length <= 5 && !learning.inVocab(pd.typed) &&
             osaDistance(pd.typed.lowercase(), r.out.lowercase()) >= 2 && gapOf(r) < RISKY_APPLY_GAP
-        if (config.suggestOnly || unsure || risky) {
-            if (flag(pd, r, ev, if (config.suggestOnly) "suggest" else if (risky) "risky" else "unsure", force = risky)) return
+        if ((config.suggestOnly && fx == null) || unsure || risky || undone) {
+            val why = if (config.suggestOnly) "suggest" else if (risky) "risky" else if (undone) "undone" else "unsure"
+            if (flag(pd, r, ev, why, force = risky || undone)) {
+                // the underline of an undone spelling fix: ignoring it is the second rejection (see learnFromUndo)
+                if (undone && isSpellingEdit(pd.typed, out)) ignoreWatch = IgnoreWatch(pd.typed, gapOf(r))
+                return
+            }
             stats.unchanged++
             if (ev != null) writePerf(r)
             return
@@ -959,7 +990,7 @@ class KeyboardController(
         prev = if (mg != null || !newest || xi != cur.length) null else Prev(r.slot, r.chosen, out, r.lmScored, pd.typed, pd.touches, if (r.lmScored) r.margin else 0.0, if (r.lmScored) r.scores else null)
         if (xi == 0 && out != pd.typed) {
             // Gboard-like: plain alternatives, no "undo" pill and not the word as typed (backspace right after undoes)
-            val ranked = r.ranked(4).filter { it != pd.typed }.take(3)
+            val ranked = (if (fx != null && fx.lowercase() != pd.typed.lowercase()) listOf(out) + r.ranked(4) else r.ranked(4)).distinct().filter { it != pd.typed }.take(3)
             setStrip(ranked, ranked.indexOf(out), StripMode.LAST_WORD)
         }
     }
@@ -1291,20 +1322,25 @@ class KeyboardController(
     }
 
     /**
-     * An auto edit was undone. Spelling: count it; the second undo of the same typed word adds it to the dictionary.
-     * Anything else (grammar guard): never the dictionary, only a suppression of this edit for a while.
+     * An auto edit was undone: that exact edit is never applied again for a while (suppress; underlined instead).
+     * Spelling: this is the first rejection of the typed word; the second (ignoring the underline that replaces the fix,
+     * see ignoreWatch) adds it to the dictionary. Anything else (grammar guard): never the dictionary.
      */
     private fun learnFromUndo(typed: String, out: String, ev: Map<String, Any?>?, gap: Double = 0.0) {
         if (learning.isUserWord(typed) || typed == out) return
-        if (isSpellingEdit(typed, out)) {
-            // looks like a typo of a common word that the model was sure about: needs undos in two sessions
-            val typoLike = gap >= STRONG_GAP && learning.nearCommonWord(typed)
-            if (learning.shouldLearn(typed, typoLike) && learning.addLearned(typed)) {
-                dictAdded = typed
-                ui.onDictAdded(typed)
-                // a toast says so; the word can be removed in settings (no extra pill in the strip)
-            }
-        } else suppressEdit(typed, out, "undo", ev)
+        if (isSpellingEdit(typed, out)) rejectSpelling(typed, gap)
+        suppressEdit(typed, out, "undo", ev)
+    }
+
+    /** one rejection of a typed word's spelling fix (undo, or an ignored underline); enough of them add the word */
+    private fun rejectSpelling(typed: String, gap: Double) {
+        // looks like a typo of a common word that the model was sure about: needs rejections in two sessions
+        val typoLike = gap >= STRONG_GAP && learning.nearCommonWord(typed)
+        if (learning.shouldLearn(typed, typoLike) && learning.addLearned(typed)) {
+            dictAdded = typed
+            ui.onDictAdded(typed)
+            // a toast says so; the word can be removed in settings (no extra pill in the strip)
+        }
     }
 
     /** how much the model preferred its fix over the word as typed (score units; big = sure) */
@@ -1343,11 +1379,20 @@ class KeyboardController(
         return true
     }
 
-    /** Standalone i / i'm / i'll / i'd / i've -> I, I'm, ... (every style except casual, which keeps text as typed). */
-    private fun capI(text: String): String {
-        if (config.style == "casual" || config.suggestOnly) return text
-        return text.split(' ').joinToString(" ") { w -> if (w in I_WORDS && learning.penalty(w, "I" + w.substring(1)) == 0.0) "I" + w.substring(1) else w }
+    /**
+     * The deterministic fix of one word (FixedFixes: lone i -> I, missing-apostrophe contractions), or null. Standard and
+     * formal styles only (casual keeps text as typed), also in suggest-only. Not for a dictionary word, and not when the
+     * user undid this exact fix before (the revert memory: learnFromUndo -> suppress).
+     */
+    private fun fixedFor(w: String): String? {
+        if (config.style == "casual") return null
+        val to = FixedFixes.fix(w) ?: return null
+        if (learning.isUserWord(w) || learning.penalty(w, to) != 0.0) return null
+        return to
     }
+
+    /** [fixedFor] for every word of [text] */
+    private fun capI(text: String): String = text.split(' ').joinToString(" ") { w -> fixedFor(w) ?: w }
 
     /** Paste / emoji: the word being typed stays as typed, then the text goes in at the cursor. */
     fun insertText(t: String) {
@@ -1543,7 +1588,6 @@ class KeyboardController(
         const val NO_SPACE_AFTER = "([{/@#\"'-_\n"
         val WORD_RE = Regex("[A-Za-z]+(?:'[A-Za-z]+)*'?")
         const val WORD_END_PUNCT = ".,!?;:)\""
-        val I_WORDS = setOf("i", "i'm", "i'll", "i'd", "i've")
         /** idle passes start after this pause in typing */
         /** idle passes (marks, sentence re-check, far rewind) only after this long without typing */
         /** marks (underlines) only after this long without typing */

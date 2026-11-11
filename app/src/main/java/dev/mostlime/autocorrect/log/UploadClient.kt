@@ -28,7 +28,7 @@ object UploadClient {
     /**
      * Upload envelope (schema autocorrect-events/3: exactly schema, install_id, app_version, events). The events are
      * the queue's JSON lines as they are (each one already scrubbed and checked by CorrectionLog), except that sentence
-     * context is taken out again unless "Include sentence context" is on right now ([context]).
+     * context is taken out again unless "Palantir Mode" is on right now ([context]).
      */
     fun envelope(installId: String, appVersion: String, lines: List<String>, context: Boolean = false): String =
         JsonObject(mapOf(

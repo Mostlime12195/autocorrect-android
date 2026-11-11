@@ -101,7 +101,7 @@ class LearningTest {
     private var nearCommon = false
     /** upload events (autocorrect-events/3) */
     private val uploads = ArrayList<Map<String, Any?>>()
-    /** the "Include sentence context" opt-in */
+    /** the "Palantir Mode" opt-in */
     private var ctxOn = false
     private val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ uploads.add(it) }, learning::inVocab, { user.onProbation(it) },
         context = { ctxOn }, ctxWindow = KeyboardController.LOG_CONTEXT_CHARS)
@@ -112,8 +112,8 @@ class LearningTest {
         override fun onDictAdded(word: String) { added.add(word) }
     }, timer, learning, corrections) { events.add(it) }
 
-    private fun start(suggestOnly: Boolean = false, confidentOnly: Boolean = false) =
-        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "test" }, "t",
+    private fun start(suggestOnly: Boolean = false, confidentOnly: Boolean = false, style: String = "standard") =
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, style, { "test" }, "t",
             suggestOnly = suggestOnly, confidentOnly = confidentOnly))
 
     private fun keyFor(c: Char): KeyDef = when (c) {
@@ -129,7 +129,7 @@ class LearningTest {
         start(suggestOnly = true)
         type("so i want teh quick brown ")
         engine.deliver()
-        assertEquals("so i want teh quick brown ", ed.text.toString())   // not even i -> I
+        assertEquals("so I want teh quick brown ", ed.text.toString())   // only the fixed rules (i -> I) edit in suggest-only
         assertTrue(ed.marks.isEmpty())                     // nothing written while typing
         // one small chip at the side; the strip's word cells stay empty for candidates
         assertEquals(StripMode.FLAG, ctl.stripMode)
@@ -139,12 +139,12 @@ class LearningTest {
         assertTrue(events.any { it["outcome"] == "flagged" && it["typed"] == "teh" })
         // a pause: the underline is attached
         timer.fireAll()
-        val at = "so i want ".length
+        val at = "so I want ".length
         assertEquals("the", ed.marks[at]?.first())
-        assertEquals("so i want teh quick brown ", ed.text.toString())
+        assertEquals("so I want teh quick brown ", ed.text.toString())
         // tapping the chip is an explicit edit: allowed
         ctl.stripAction()
-        assertEquals("so i want the quick brown ", ed.text.toString())
+        assertEquals("so I want the quick brown ", ed.text.toString())
         assertTrue(!ed.marks.containsKey(at))
         assertTrue(events.any { it["outcome"] == "strip_pick" && it["final"] == "the" })
     }
@@ -256,25 +256,113 @@ class LearningTest {
         assertTrue(corrector.candidates("fizrd", null).cands.contains("Fized"))
     }
 
-    @Test fun twoSpellingUndosAddTheWord() {
+    /** one undo = never auto-applied again (underlined instead); ignoring that underline is the second rejection */
+    @Test fun undoneSpellingFixComesBackAsAnUnderlineNotAnEdit() {
         start()
-        repeat(2) {
-            type("fized ")
-            engine.deliver()
-            assertTrue(ed.text.toString(), ed.text.endsWith("fixed "))
-            type("\b")                                     // undo: back to "fized"
-            type(" ")
-        }
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))   // the model still wants it
+        type("fized ")
+        engine.deliver()
+        assertTrue(ed.text.toString(), ed.text.endsWith("fixed "))
+        type("\b")                                         // undo: back to "fized"
+        type(" ")
+        assertEquals("fized ", ed.text.toString())
+        assertTrue(user.penalty("fized", "fixed") > 0)
+        assertFalse(user.has("fized"))                      // one rejection: not yet in the dictionary
+        type("fized ")
+        engine.deliver()
+        assertEquals("fized fized ", ed.text.toString())    // not edited
+        timer.fireAll()
+        assertEquals("fixed", ed.marks["fized ".length]?.first())   // underlined, with the fix on offer
+        assertTrue(events.any { it["outcome"] == "flagged" && it["flag"] == "undone" })
+    }
+
+    @Test fun twoSpellingRejectionsAddTheWord() {
+        start()
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))
+        type("fized ")
+        engine.deliver()
+        assertTrue(ed.text.toString(), ed.text.endsWith("fixed "))
+        type("\b")                                         // rejection 1: the undo
+        type(" ")
+        assertFalse(user.has("fized"))
+        type("fized ")
+        engine.deliver()                                    // underlined, not edited
+        type("a ")                                          // rejection 2: the underline is ignored
         assertTrue(user.has("fized"))
         assertEquals(listOf("fized"), added)
         type("fized ")
         engine.deliver()
-        assertTrue(ed.text.toString(), ed.text.endsWith("fized fized fized "))
+        assertTrue(ed.text.toString(), ed.text.endsWith("fized fized a fized "))
+    }
+
+    // ------------------------------------------------------------------ fixed rules (FixedFixes): lone i, missing apostrophes
+    @Test fun loneIAndContractionsAreFixedInEveryModeButCasual() {
+        for (mode in listOf("standard", "formal")) {
+            for (sug in listOf(false, true)) {
+                ed.text.setLength(0); engine.queue.clear()
+                start(suggestOnly = sug, style = mode)
+                type("i so want im the dont ")   // at most MAX_PENDING (6) words in flight
+                engine.deliver()
+                assertEquals("$mode suggestOnly=$sug", "I so want I'm the don't ", ed.text.toString())
+            }
+        }
+        // "only auto-correct when confident": a deterministic fix is never unsure
+        ed.text.setLength(0); engine.queue.clear()
+        start(confidentOnly = true)
+        engine.crafted["dont"] = result("dont", listOf("dont", "don't"), doubleArrayOf(0.0, 0.5))
+        type("dont ")
+        engine.deliver()
+        assertEquals("don't ", ed.text.toString())
+        // casual keeps the text as typed
+        ed.text.setLength(0); engine.queue.clear()
+        start(style = "casual")
+        engine.crafted["dont"] = result("dont", listOf("dont", "don't"), doubleArrayOf(1.0, 0.0))   // the model keeps it too
+        type("i dont ")
+        engine.deliver()
+        assertEquals("i dont ", ed.text.toString())
+    }
+
+    @Test fun contractionFixKeepsTheFirstLettersCase() {
+        start()
+        ctl.shift = Shift.ON
+        type("dont ")
+        engine.deliver()
+        assertEquals("Don't ", ed.text.toString())
+        type("one more ")
+        engine.deliver()
+        assertEquals("Don't one more ", ed.text.toString())
+    }
+
+    @Test fun undoneFixedFixesStayUndone() {
+        start()
+        engine.crafted["dont"] = result("dont", listOf("dont", "don't"), doubleArrayOf(1.0, 0.0))   // the model alone would keep it
+        engine.crafted["i"] = result("i", listOf("i", "I"), doubleArrayOf(1.0, 0.0))
+        type("i dont ")
+        engine.deliver()
+        assertEquals("I don't ", ed.text.toString())
+        type("\b"); type(" ")                               // undo don't, keep it as typed
+        assertEquals("I dont ", ed.text.toString())
+        assertTrue(user.penalty("dont", "don't") > 0)
+        assertTrue(events.any { it["type"] == "suppress" && it["typed"] == "dont" && it["chosen"] == "don't" })
+        type("dont ")
+        engine.deliver()
+        assertEquals("I dont dont ", ed.text.toString())     // never again (also with a capital: the memory ignores case)
+        // the lone i: same rule
+        type("i ")
+        engine.deliver()
+        assertEquals("I dont dont I ", ed.text.toString())
+        type("\b"); type(" ")
+        assertTrue(user.penalty("i", "I") > 0)
+        type("i ")
+        engine.deliver()
+        assertEquals("I dont dont i i ", ed.text.toString())
     }
 
     @Test fun autoAddShowsNoPill() {
         start()
-        repeat(2) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))
+        type("fized "); engine.deliver(); type("\b"); type(" ")
+        type("fized "); engine.deliver(); type("a ")
         assertTrue(user.has("fized"))
         assertEquals(null, ctl.shownAction)
     }
@@ -282,12 +370,16 @@ class LearningTest {
     @Test fun grammarUndosNeverTouchTheDictionary() {
         start()
         engine.crafted["their"] = result("their", listOf("their", "there"), doubleArrayOf(0.0, 5.0))
-        repeat(3) {
+        type("i went their ")
+        engine.deliver()
+        assertTrue(ed.text.toString(), ed.text.endsWith("went there "))
+        type("\b")                                         // undo the confusable swap
+        type(" ")
+        ed.text.setLength(0); ctl.startInput(ctl.config)
+        repeat(2) {                                         // never swapped again
             type("i went their ")
             engine.deliver()
-            assertTrue(ed.text.toString(), ed.text.endsWith("went there "))
-            type("\b")                                     // undo the confusable swap
-            type(" ")
+            assertTrue(ed.text.toString(), ed.text.endsWith("went their "))
             ed.text.setLength(0); ctl.startInput(ctl.config)
         }
         assertFalse(user.has("their"))
@@ -425,7 +517,9 @@ class LearningTest {
         }
         assertFalse(user.has("fized"))
         // a real undo (the word as typed stays) still counts
-        repeat(2) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))
+        type("fized "); engine.deliver(); type("\b"); type(" ")
+        type("fized "); engine.deliver(); type("a ")
         assertTrue(user.has("fized"))
     }
 
@@ -434,10 +528,11 @@ class LearningTest {
         nearCommon = true
         engine.crafted["fized"] = result("fized", listOf("fized", "fixed"), doubleArrayOf(0.0, 9.0))   // strong preference
         start()
-        repeat(3) { type("fized "); engine.deliver(); type("\b"); type(" ") }
+        type("fized "); engine.deliver(); type("\b"); type(" ")                 // the undo
+        repeat(3) { type("fized "); engine.deliver(); type("a ") }                // underlined, ignored
         assertFalse("same session: not learned", user.has("fized"))
         session = "s2"; start()
-        type("fized "); engine.deliver(); type("\b"); type(" ")
+        type("fized "); engine.deliver(); type("a ")
         assertTrue(user.has("fized"))
         assertEquals(listOf("fized"), user.probationWords())     // on probation: protected, not suggested yet
         assertTrue(user.near("fizrd").isEmpty())

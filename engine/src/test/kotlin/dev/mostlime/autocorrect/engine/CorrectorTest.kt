@@ -55,6 +55,29 @@ class CorrectorTest {
         assertNull(r2.merge)
     }
 
+    @Test fun undoneMergeIsNotAppliedAgain() {
+        val c = corr()
+        val prevSlot = c.candidates("some", KeyGeom.keyTouches("some"))
+        val prev = PrevWord(prevSlot, prevSlot.typedIdx, "i need", " ", lmScored = true)
+        fun run(lm: LmScorer) = c.correctWord(WordInput("thing", KeyGeom.keyTouches("thing"), "i need some", " "), lm, p, prev,
+            merge = MergeInput("some", KeyGeom.keyTouches("some")))
+        // an LM where the merge wins by less than the suppression penalty
+        var lm: LmScorer? = null
+        var delta = 0.5
+        while (delta < 12.0 && lm == null) {
+            val d = delta
+            val cand = LmScorer { reqs -> DoubleArray(reqs.size) { i -> val t = reqs[i].cont
+                if (t.endsWith(" something")) -1.0 else if (t.endsWith(" some thing")) -1.0 - d else -12.0 } }
+            val m = run(cand).merge
+            if (m != null && m.best - m.keep < UserData.SUPPRESS_NATS - 0.1) lm = cand
+            delta += 0.25
+        }
+        assertNotNull(lm)
+        assertEquals("something", run(lm!!).merge!!.to)
+        c.user = UserData(null, null).also { it.suppress("some thing", "something") }
+        assertNull(run(lm).merge)
+    }
+
     @Test fun v2SplitsAndContractions() {
         val c = corr()
         val s = c.candidates("inaminute", KeyGeom.keyTouches("inaminute"))

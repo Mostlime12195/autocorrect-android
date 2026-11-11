@@ -63,7 +63,7 @@ class Prefs(private val ctx: Context) {
         get() = sp.getLong(STATS_RESET, 0L)
         set(v) = sp.edit().putLong(STATS_RESET, v).apply()
     val share get() = sp.getBoolean(SHARE, false)
-    /** "Include sentence context": its own opt-in, off by default, and only ever on while sharing is on */
+    /** "Palantir Mode": its own opt-in, off by default, and only ever on while sharing is on */
     val shareContext get() = share && sp.getBoolean(SHARE_CONTEXT, false)
     val wifiOnly get() = sp.getBoolean(WIFI_ONLY, true)
     /** the custom URL from settings, else the default (older builds saved the example.invalid placeholder: ignored) */

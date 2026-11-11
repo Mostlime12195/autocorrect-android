@@ -135,7 +135,7 @@ class EventLog(
             return if (newOffset < 0) out else newOffset
         }
 
-        /** an upload event without its sentence context (what is sent while "Include sentence context" is off) */
+        /** an upload event without its sentence context (what is sent while "Palantir Mode" is off) */
         fun withoutContext(line: String): String {
             if ("\"ctx_" !in line) return line
             val o = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(line) as? JsonObject }.getOrNull() ?: return line
