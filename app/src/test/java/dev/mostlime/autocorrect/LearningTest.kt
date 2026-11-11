@@ -273,16 +273,22 @@ class LearningTest {
     }
 
     // ------------------------------------------------------------------ fixed rules (FixedFixes): lone i, missing apostrophes
+    private fun fixedCase(mode: String, sug: Boolean, typed: String, want: String) {
+        ed.text.setLength(0); engine.queue.clear()
+        start(suggestOnly = sug, style = mode)
+        type(typed)
+        engine.deliver()
+        assertEquals("$mode suggestOnly=$sug", want, ed.text.toString())
+    }
+    @Test fun dbgStdIm() = fixedCase("standard", false, "im ", "I'm ")
+    @Test fun dbgStdSo() = fixedCase("standard", false, "i so want ", "I so want ")
+    @Test fun dbgStdThe() = fixedCase("standard", false, "the one i dont be ", "the one I don't be ")
+    @Test fun dbgStdAll() = fixedCase("standard", false, "i so want im the one i dont be ", "I so want I'm the one I don't be ")
+    @Test fun dbgSugAll() = fixedCase("standard", true, "i so want im the one i dont be ", "I so want I'm the one I don't be ")
+    @Test fun dbgFormalAll() = fixedCase("formal", false, "i so want im the one i dont be ", "I so want I'm the one I don't be ")
+    @Test fun dbgFormalSugAll() = fixedCase("formal", true, "i so want im the one i dont be ", "I so want I'm the one I don't be ")
+
     @Test fun loneIAndContractionsAreFixedInEveryModeButCasual() {
-        for (mode in listOf("standard", "formal")) {
-            for (sug in listOf(false, true)) {
-                ed.text.setLength(0); engine.queue.clear()
-                start(suggestOnly = sug, style = mode)
-                type("i so want im the one i dont be ")
-                engine.deliver()
-                assertEquals("$mode suggestOnly=$sug", "I so want I'm the one I don't be ", ed.text.toString())
-            }
-        }
         // "only auto-correct when confident": a deterministic fix is never unsure
         ed.text.setLength(0); engine.queue.clear()
         start(confidentOnly = true)
