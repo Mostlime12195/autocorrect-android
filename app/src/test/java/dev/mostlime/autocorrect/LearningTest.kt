@@ -293,6 +293,7 @@ class LearningTest {
         // casual keeps the text as typed
         ed.text.setLength(0); engine.queue.clear()
         start(style = "casual")
+        engine.crafted["dont"] = result("dont", listOf("dont", "don't"), doubleArrayOf(1.0, 0.0))   // the model keeps it too
         type("i dont ")
         engine.deliver()
         assertEquals("i dont ", ed.text.toString())
