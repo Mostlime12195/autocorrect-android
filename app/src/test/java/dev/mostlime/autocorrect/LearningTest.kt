@@ -274,6 +274,15 @@ class LearningTest {
 
     // ------------------------------------------------------------------ fixed rules (FixedFixes): lone i, missing apostrophes
     @Test fun loneIAndContractionsAreFixedInEveryModeButCasual() {
+        for (mode in listOf("standard", "formal")) {
+            for (sug in listOf(false, true)) {
+                ed.text.setLength(0); engine.queue.clear()
+                start(suggestOnly = sug, style = mode)
+                type("i so want im the dont ")   // at most MAX_PENDING (6) words in flight
+                engine.deliver()
+                assertEquals("$mode suggestOnly=$sug", "I so want I'm the don't ", ed.text.toString())
+            }
+        }
         // "only auto-correct when confident": a deterministic fix is never unsure
         ed.text.setLength(0); engine.queue.clear()
         start(confidentOnly = true)
