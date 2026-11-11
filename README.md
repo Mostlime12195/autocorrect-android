@@ -172,7 +172,7 @@ model (σ = 0.3 key widths) sees real touch positions. The bottom row's space ba
   batch; other 4xx skip the batch. **Delete my uploaded data** calls `DELETE /api/v1/install/{id}`, clears the local log
   and starts a new install ID (a failed call is retried by the worker before any upload). Request format:
   [docs/upload-schema.md](docs/upload-schema.md); server API: `collect/API.md` in the autocorrect repo.
-- **Include sentence context** is a second switch under it, also off by default and only usable while sharing is on:
+- **Palantir Mode** is a second switch under it, also off by default and only usable while sharing is on:
   it also sends the sentence around each correction (at most 24 words before and 12 after, same line, numbers /
   emails / links / @names / codes replaced by placeholders on the phone first). Never from name, address, filter or
   no-suggestion fields; nothing at all is uploaded from password managers, authenticators and terminals. Turning it

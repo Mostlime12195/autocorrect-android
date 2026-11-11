@@ -12,7 +12,7 @@ import java.time.ZoneOffset
  * it waits for the outcome of a decision (kept / undone / picked / ignored ...), adds at most 2 words before and 1 after,
  * scrubs everything and hands the finished event to [sink]. The controller never calls it for sensitive fields.
  *
- * With the separate "Include sentence context" opt-in (and only then) an event also carries ctx_before / ctx_after:
+ * With the separate "Palantir Mode" opt-in (and only then) an event also carries ctx_before / ctx_after:
  * the rest of the current sentence around the word, clipped and scrubbed by [Ctx].
  */
 object Scrub {
@@ -57,7 +57,7 @@ object Scrub {
 }
 
 /**
- * Sentence context for the "Include sentence context" opt-in (DATA.md "Sentence context"). The same rules, in the same
+ * Sentence context for the "Palantir Mode" opt-in (DATA.md "Sentence context"). The same rules, in the same
  * order, as the reference in the autocorrect repo (collect/server.py ctx_token, collect/ctx_ref.py); CorrectionsTest
  * replays that reference's vectors (ctx_vectors.json).
  *
@@ -233,7 +233,7 @@ class CorrectionLog(
     private val isProbation: (String) -> Boolean = { false },
     private val now: () -> Long = System::currentTimeMillis,
     private val platform: String = "android",
-    /** the "Include sentence context" opt-in (only true while sharing is on too); read for every event */
+    /** the "Palantir Mode" opt-in (only true while sharing is on too); read for every event */
     private val context: () -> Boolean = { false },
     /** size of the left_context window in the keyboard's local events (a full window may start mid-word) */
     private val ctxWindow: Int = 240,

@@ -286,7 +286,9 @@ class Corrector(
                         val v = round3(mc[j].sp) + p.lamRe * lpm[j] - (p.pen["merge"] ?: 0.0)
                         if (v > best) { best = v; bj = j }
                     }
-                    if (best > keep) mergeOut = Merge(ms[bj], best, keep)
+                    // a merge the user undid recently needs SUPPRESS_NATS more (same key as the controller's suppress of "prev word")
+                    val mpen = if (bj >= 0) u?.penalty(prev.slot.cands[prev.idx] + sep + merge.typed, ms[bj]) ?: 0.0 else 0.0
+                    if (best > keep + mpen) mergeOut = Merge(ms[bj], best, keep)
                 }
             }
         }

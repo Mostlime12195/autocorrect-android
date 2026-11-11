@@ -101,7 +101,7 @@ class LearningTest {
     private var nearCommon = false
     /** upload events (autocorrect-events/3) */
     private val uploads = ArrayList<Map<String, Any?>>()
-    /** the "Include sentence context" opt-in */
+    /** the "Palantir Mode" opt-in */
     private var ctxOn = false
     private val corrections = dev.mostlime.autocorrect.log.CorrectionLog({ uploads.add(it) }, learning::inVocab, { user.onProbation(it) },
         context = { ctxOn }, ctxWindow = KeyboardController.LOG_CONTEXT_CHARS)
@@ -112,8 +112,8 @@ class LearningTest {
         override fun onDictAdded(word: String) { added.add(word) }
     }, timer, learning, corrections) { events.add(it) }
 
-    private fun start(suggestOnly: Boolean = false, confidentOnly: Boolean = false) =
-        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, "standard", { "test" }, "t",
+    private fun start(suggestOnly: Boolean = false, confidentOnly: Boolean = false, style: String = "standard") =
+        ctl.startInput(ControllerConfig(FieldPolicy.of(InputType.TYPE_CLASS_TEXT, 0), true, style, { "test" }, "t",
             suggestOnly = suggestOnly, confidentOnly = confidentOnly))
 
     private fun keyFor(c: Char): KeyDef = when (c) {
@@ -129,7 +129,7 @@ class LearningTest {
         start(suggestOnly = true)
         type("so i want teh quick brown ")
         engine.deliver()
-        assertEquals("so i want teh quick brown ", ed.text.toString())   // not even i -> I
+        assertEquals("so I want teh quick brown ", ed.text.toString())   // only the fixed rules (i -> I) edit in suggest-only
         assertTrue(ed.marks.isEmpty())                     // nothing written while typing
         // one small chip at the side; the strip's word cells stay empty for candidates
         assertEquals(StripMode.FLAG, ctl.stripMode)
@@ -139,12 +139,12 @@ class LearningTest {
         assertTrue(events.any { it["outcome"] == "flagged" && it["typed"] == "teh" })
         // a pause: the underline is attached
         timer.fireAll()
-        val at = "so i want ".length
+        val at = "so I want ".length
         assertEquals("the", ed.marks[at]?.first())
-        assertEquals("so i want teh quick brown ", ed.text.toString())
+        assertEquals("so I want teh quick brown ", ed.text.toString())
         // tapping the chip is an explicit edit: allowed
         ctl.stripAction()
-        assertEquals("so i want the quick brown ", ed.text.toString())
+        assertEquals("so I want the quick brown ", ed.text.toString())
         assertTrue(!ed.marks.containsKey(at))
         assertTrue(events.any { it["outcome"] == "strip_pick" && it["final"] == "the" })
     }
@@ -270,6 +270,68 @@ class LearningTest {
         type("fized ")
         engine.deliver()
         assertTrue(ed.text.toString(), ed.text.endsWith("fized fized fized "))
+    }
+
+    // ------------------------------------------------------------------ fixed rules (FixedFixes): lone i, missing apostrophes
+    @Test fun loneIAndContractionsAreFixedInEveryModeButCasual() {
+        for (mode in listOf("standard", "formal")) {
+            for (sug in listOf(false, true)) {
+                ed.text.setLength(0); engine.queue.clear()
+                start(suggestOnly = sug, style = mode)
+                type("i'm so want im the one i dont be ")
+                engine.deliver()
+                assertEquals("$mode suggestOnly=$sug", "I'm so want I'm the one I don't be ", ed.text.toString())
+            }
+        }
+        // "only auto-correct when confident": a deterministic fix is never unsure
+        ed.text.setLength(0); engine.queue.clear()
+        start(confidentOnly = true)
+        engine.crafted["dont"] = result("dont", listOf("dont", "don't"), doubleArrayOf(0.0, 0.5))
+        type("dont ")
+        engine.deliver()
+        assertEquals("don't ", ed.text.toString())
+        // casual keeps the text as typed
+        ed.text.setLength(0); engine.queue.clear()
+        start(style = "casual")
+        type("i dont ")
+        engine.deliver()
+        assertEquals("i dont ", ed.text.toString())
+    }
+
+    @Test fun contractionFixKeepsTheFirstLettersCaseAndLeavesRealWordsAlone() {
+        start()
+        ctl.shift = Shift.ON
+        type("dont ")
+        engine.deliver()
+        assertEquals("Don't ", ed.text.toString())
+        type("its well and wont ")
+        engine.deliver()
+        assertEquals("Don't its well and wont ", ed.text.toString())
+    }
+
+    @Test fun undoneFixedFixesStayUndone() {
+        start()
+        engine.crafted["dont"] = result("dont", listOf("dont", "don't"), doubleArrayOf(1.0, 0.0))   // the model alone would keep it
+        engine.crafted["i"] = result("i", listOf("i", "I"), doubleArrayOf(1.0, 0.0))
+        type("i dont ")
+        engine.deliver()
+        assertEquals("I don't ", ed.text.toString())
+        type("\b"); type(" ")                               // undo don't, keep it as typed
+        assertEquals("I dont ", ed.text.toString())
+        assertTrue(user.penalty("dont", "don't") > 0)
+        assertTrue(events.any { it["type"] == "suppress" && it["typed"] == "dont" && it["chosen"] == "don't" })
+        type("dont ")
+        engine.deliver()
+        assertEquals("I dont dont ", ed.text.toString())     // never again (also with a capital: the memory ignores case)
+        // the lone i: same rule
+        type("i ")
+        engine.deliver()
+        assertEquals("I dont dont I ", ed.text.toString())
+        type("\b"); type(" ")
+        assertTrue(user.penalty("i", "I") > 0)
+        type("i ")
+        engine.deliver()
+        assertEquals("I dont dont i i ", ed.text.toString())
     }
 
     @Test fun autoAddShowsNoPill() {
