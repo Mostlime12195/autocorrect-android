@@ -33,6 +33,23 @@ class KeyboardRoot(ctx: Context, val keys: KeyboardView) : FrameLayout(ctx) {
         v.animate().alpha(1f).setDuration(120).start()
     }
 
+    /**
+     * The keys alone set the height. A panel only fills the key area: measured as a plain FrameLayout child, a
+     * scrolling panel (emoji) asked for the whole screen, the input window grew, the field restarted input and the
+     * panel was closed again at once (a flash).
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        measureChildWithMargins(keys, widthMeasureSpec, 0, heightMeasureSpec, 0)
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val h = keys.measuredHeight
+        setMeasuredDimension(w, h)
+        panel?.let {
+            val lp = it.layoutParams as LayoutParams
+            it.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(maxOf(0, h - lp.topMargin - lp.bottomMargin), MeasureSpec.EXACTLY))
+        }
+    }
+
     fun hidePanel() { panel?.let { removeView(it) }; panel = null }
     val panelShown get() = panel != null
     /** the panel on screen, if any */
